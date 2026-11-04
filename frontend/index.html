@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>modelseek</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/static/themes.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script>    (function () {
+      var ui = {};
+      try { ui = JSON.parse(localStorage.getItem("modelseek.ui") || "{}"); } catch (e) {}
+      var t = ui.theme || "auto";
+      if (t === "auto") t = matchMedia("(prefers-color-scheme: light)").matches ? "latte" : "plate";
+      document.documentElement.dataset.theme = t;
+      document.documentElement.dataset.density = ui.density || "normal";
+    })();
+</script>
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="#search" aria-label="modelseek — поиск">
+      <svg class="owl" viewBox="0 0 64 64" aria-hidden="true">
+        <path class="axis" d="M11 57V9M7.5 13 11 8l3.5 5M7 51h48M50 47.5l5.5 3.5-5.5 3.5"/>
+        <clipPath id="owl-body"><path d="M24 50c-3.5-9-3.5-21 .8-27.5L22.6 12l8.4 6.4c3-1 7-1 10 0L49.4 12l-2.2 10.5C51.5 29 51.5 41 48 50z"/></clipPath>
+        <path class="body" d="M24 50c-3.5-9-3.5-21 .8-27.5L22.6 12l8.4 6.4c3-1 7-1 10 0L49.4 12l-2.2 10.5C51.5 29 51.5 41 48 50z"/>
+        <path class="layers" clip-path="url(#owl-body)" d="M18 39h36M18 43h36M18 47h36"/>
+        <circle class="socket" cx="31" cy="29" r="5.6"/><circle class="socket" cx="41" cy="29" r="5.6"/>
+        <circle class="pupil" cx="31.6" cy="29.6" r="2.3"/><circle class="pupil" cx="41.6" cy="29.6" r="2.3"/>
+        <path class="beak" d="M34.4 33.2 36 36.6l1.6-3.4z"/>
+        <path class="guide" d="M13.5 29h8"/>
+        <path class="feet" d="M30.5 49.6l-.8 2.6M33 49.6v2.6M39 49.6v2.6M41.5 49.6l.8 2.6"/>
+      </svg>
+      <span>model<b>seek</b></span>
+    </a>
+
+    <form id="search-form" class="search" role="search" autocomplete="off">
+      <input id="q" name="q" type="search" spellcheck="false" aria-label="Поисковый запрос"
+             placeholder="Что напечатаем? gridfinity, headphone holder, держатель…" aria-autocomplete="list" aria-controls="history-pop">
+      <kbd class="hint" aria-hidden="true">/</kbd>
+      <button id="img-open" type="button" class="btn icon cam" aria-label="Поиск по картинке" title="Поиск по картинке">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      </button>
+      <button type="submit" class="btn primary">Найти</button>
+      <div id="history-pop" class="pop history-pop" role="listbox" hidden></div>
+    </form>
+
+    <nav class="tabs" aria-label="Разделы">
+      <a href="#search" data-view="search" class="tab">Поиск</a>
+      <a href="#favorites" data-view="favorites" class="tab">Избранное <span id="fav-count" class="count"></span></a>
+      <a href="#subs" data-view="subs" class="tab">Подписки <span id="subs-new" class="count new" hidden></span></a>
+      <a href="#settings" data-view="settings" class="tab tab-icon" aria-label="Настройки" title="Настройки">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </a>
+    </nav>
+  </header>
+
+  <section id="view-search" class="view">
+    <nav id="sources" class="sources" aria-label="Источники"></nav>
+    <div id="links-row" class="links-row" hidden></div>
+
+    <div class="toolbar">
+      <label class="preset-pick">
+        <span class="sr-only">Пресет фильтров</span>
+        <select id="preset" aria-label="Пресет фильтров"></select>
+      </label>
+      <div id="active-filters" class="active-filters" aria-label="Активные фильтры"></div>
+      <div class="toolbar-right">
+        <select id="sort" aria-label="Сортировка">
+          <option value="score">По рейтингу</option>
+          <option value="likes">По лайкам</option>
+          <option value="downloads">По скачиваниям</option>
+          <option value="makes">По печатям (makes)</option>
+          <option value="newest">Сначала новые</option>
+        </select>
+        <button id="subscribe" class="btn ghost" type="button" disabled title="Сначала выполните поиск">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0"/></svg>
+          Подписаться
+        </button>
+        <button id="open-settings" class="btn ghost" type="button" aria-controls="settings" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+          Фильтры и веса
+        </button>
+      </div>
+    </div>
+
+    <div id="facets" class="facets" hidden></div>
+    <p id="summary" class="summary" aria-live="polite"></p>
+    <section id="results" class="grid" aria-label="Результаты"></section>
+
+    <div id="empty" class="empty">
+      <h1>Один поиск по всем сайтам с моделями</h1>
+      <p>Рейтинг считается у вас: крутите веса и фильтры — выдача пересчитается без новых запросов к сайтам.
+         Над результатами появятся темы, чтобы быстро уточнить неоднозначный запрос.</p>
+      <div class="examples">
+        <button type="button" data-q="gridfinity">gridfinity</button>
+        <button type="button" data-q="headphone holder">headphone holder</button>
+        <button type="button" data-q="hornet">hornet</button>
+        <button type="button" data-q="dnd terrain">dnd terrain</button>
+      </div>
+    </div>
+    <div class="more-wrap"><button id="more" class="btn ghost" type="button" hidden>Загрузить ещё</button></div>
+  </section>
+
+  <section id="view-favorites" class="view" hidden>
+    <div class="view-head">
+      <h1>Избранное</h1>
+      <div id="collections" class="chips-row" aria-label="Коллекции"></div>
+    </div>
+    <section id="fav-grid" class="grid" aria-label="Избранные модели"></section>
+    <div id="fav-empty" class="empty small" hidden>
+      <p>Пока пусто. Нажмите ♡ на карточке в поиске — модель попадёт сюда. Коллекции создаются там же.</p>
+    </div>
+  </section>
+
+  <section id="view-subs" class="view" hidden>
+    <div class="view-head">
+      <h1>Подписки</h1>
+      <p class="muted">modelseek повторяет поиск с выбранной периодичностью и показывает только новые модели.
+        Работает, пока запущен modelseek. <span id="notify-state"></span></p>
+    </div>
+    <div id="subs-list" class="subs-list"></div>
+    <div id="subs-empty" class="empty small" hidden>
+      <p>Подписок нет. Выполните поиск, настройте фильтры и нажмите «Подписаться».</p>
+    </div>
+    <div id="sub-detail" hidden>
+      <div class="view-head row">
+        <a href="#subs" class="btn ghost">← Все подписки</a>
+        <h2 id="sub-title"></h2>
+        <div class="grow"></div>
+        <button id="sub-open-search" class="btn ghost" type="button">Открыть как поиск</button>
+        <button id="sub-mark-seen" class="btn" type="button">Отметить всё просмотренным</button>
+      </div>
+      <section id="sub-grid" class="grid" aria-label="Найдено по подписке"></section>
+    </div>
+  </section>
+
+  <section id="view-settings" class="view" hidden>
+    <div class="settings-layout">
+      <nav class="settings-nav" aria-label="Разделы настроек">
+        <a href="#settings/look">Внешний вид</a>
+        <a href="#settings/sources">Источники</a>
+        <a href="#settings/custom">Свои источники</a>
+        <a href="#settings/ranking">Ранжирование</a>
+        <a href="#settings/smart">Перевод и смысл</a>
+        <a href="#settings/components">Компоненты</a>
+        <a href="#settings/notify">Подписки и уведомления</a>
+        <a href="#settings/server">Сервер</a>
+      </nav>
+      <div id="settings-body" class="settings-body"></div>
+    </div>
+  </section>
+
+  <aside id="settings" class="drawer" aria-label="Фильтры и ранжирование" hidden>
+    <div class="drawer-head">
+      <h2>Фильтры и веса</h2>
+      <button id="close-settings" class="btn icon" type="button" aria-label="Закрыть">✕</button>
+    </div>
+
+    <section>
+      <h3>Пресеты</h3>
+      <div id="preset-list" class="preset-list"></div>
+      <form id="preset-save" class="inline-form">
+        <input id="preset-name" type="text" placeholder="Сохранить текущие фильтры как…" aria-label="Название пресета">
+        <button class="btn" type="submit">Сохранить</button>
+      </form>
+    </section>
+
+    <section>
+      <h3>Фильтры</h3>
+      <fieldset class="seg" aria-label="Цена">
+        <legend>Цена</legend>
+        <label><input type="radio" name="price" value="any"> Любая</label>
+        <label><input type="radio" name="price" value="free"> Бесплатно</label>
+        <label><input type="radio" name="price" value="paid"> Платно</label>
+      </fieldset>
+      <div class="grid2">
+        <label class="field"><span>Цена до, €</span><input id="f-max_price" type="number" min="0" step="0.5" placeholder="—"></label>
+        <label class="field"><span>Период</span>
+          <select id="f-days">
+            <option value="0">За всё время</option><option value="7">7 дней</option><option value="30">30 дней</option>
+            <option value="90">3 месяца</option><option value="365">Год</option><option value="730">2 года</option>
+          </select></label>
+        <label class="field"><span>Лайков от</span><input id="f-min_likes" type="number" min="0" step="1"></label>
+        <label class="field"><span>Скачиваний от</span><input id="f-min_downloads" type="number" min="0" step="1"></label>
+        <label class="field"><span>Печатей (makes) от</span><input id="f-min_makes" type="number" min="0" step="1"></label>
+        <label class="field"><span>Лицензия</span>
+          <select id="f-license">
+            <option value="any">Любая</option>
+            <option value="commercial">Не запрещает продажу</option>
+            <option value="commercial_strict">Точно можно продавать</option>
+          </select></label>
+      </div>
+      <label class="field"><span>Обязательно слова (через запятую)</span><input id="f-include" type="text" placeholder="clamp, desk"></label>
+      <label class="field"><span>Исключить слова</span><input id="f-exclude" type="text" placeholder="nsfw, remix"></label>
+      <label class="field"><span>Скрыть авторов</span><input id="f-exclude_authors" type="text" placeholder="ник1, ник2"></label>
+      <label class="check"><input id="f-has_image" type="checkbox"> Только с превью</label>
+      <label class="check"><input id="f-hide_seen" type="checkbox"> Скрыть уже открытые мной</label>
+      <label class="check"><input id="dedupe" type="checkbox" checked> Склеивать одну модель с разных сайтов</label>
+    </section>
+
+    <section>
+      <h3>Веса сигналов</h3>
+      <p class="muted">Нормируются к сумме 1. Нажмите на балл в карточке — увидите разбивку.</p>
+      <div id="weights"></div>
+      <label class="field"><span>Период полураспада свежести, дней</span><input id="half_life" type="number" min="7" max="3650" step="1"></label>
+    </section>
+
+    <section>
+      <h3>Вес источников</h3>
+      <div id="source-weights"></div>
+    </section>
+
+    <section>
+      <h3>Сервис</h3>
+      <div class="drawer-foot">
+        <button id="reset" class="btn ghost" type="button">Сбросить к умолчаниям</button>
+        <button id="clear-cache" class="btn ghost" type="button">Очистить кэш</button>
+        <button id="clear-history" class="btn ghost" type="button">Очистить историю</button>
+      </div>
+      <details class="hidden-list">
+        <summary>Скрытые модели <span id="hidden-count"></span></summary>
+        <ul id="hidden-items"></ul>
+      </details>
+      <div id="features" class="features"></div>
+    </section>
+  </aside>
+
+  <dialog id="sub-dialog" class="dialog">
+    <form method="dialog" id="sub-form">
+      <h2>Подписка на запрос</h2>
+      <p class="muted">Будут сохранены текущие фильтры, источники и веса. Первый прогон запомнит то, что есть сейчас,
+        дальше вы увидите только новое.</p>
+      <label class="field"><span>Запрос</span><input id="sub-query" type="text" required></label>
+      <label class="field"><span>Как часто проверять</span><select id="sub-interval"></select></label>
+      <label class="field" id="sub-custom-wrap" hidden><span>Каждые N минут (от 15)</span>
+        <input id="sub-custom" type="number" min="15" step="5" value="180"></label>
+      <div class="dialog-foot">
+        <button value="cancel" class="btn ghost" formnovalidate>Отмена</button>
+        <button id="sub-create" value="ok" class="btn primary">Подписаться</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="img-dialog" class="dialog wide" aria-labelledby="img-title">
+    <h2 id="img-title">Поиск по картинке</h2>
+    <p class="muted">Картинку ищут сервисы, которые это умеют: она откроется у них в новой вкладке и уйдёт на их сервер.
+      modelseek её не сохраняет.</p>
+    <div id="img-drop" class="drop" tabindex="0" role="button" aria-label="Выбрать картинку">
+      <b>Перетащите фото сюда</b>
+      <span class="muted">или нажмите, чтобы выбрать файл, или вставьте из буфера (Ctrl+V)</span>
+    </div>
+    <input id="img-file" type="file" accept="image/*,.stl,.3mf,.obj" hidden>
+    <label class="field"><span>…или ссылка на картинку</span>
+      <input id="img-url" type="url" placeholder="https://…/photo.jpg"></label>
+    <div id="img-preview" class="img-preview" hidden></div>
+    <div id="img-services" class="img-services"></div>
+    <p id="img-stl" class="muted small" hidden>Для 3D-файлов поиск по форме есть на
+      <a href="https://thangs.com" target="_blank" rel="noopener noreferrer">Thangs ↗</a> — загрузите файл там.</p>
+    <div class="dialog-foot"><button id="img-close" type="button" class="btn ghost">Закрыть</button></div>
+  </dialog>
+
+  <div id="fav-pop" class="pop fav-pop" role="dialog" aria-label="Добавить в коллекцию" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <template id="card-tpl">
+    <article class="card">
+      <a class="thumb" target="_blank" rel="noopener noreferrer">
+        <img loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="">
+        <span class="price"></span>
+        <span class="new-badge" hidden>НОВОЕ</span>
+      </a>
+      <div class="card-actions">
+        <button class="act fav" type="button" aria-label="В избранное" title="В избранное">♡</button>
+        <button class="act similar" type="button" aria-label="Похожие по картинке" title="Похожие по картинке">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+        </button>
+        <button class="act hide" type="button" aria-label="Скрыть модель" title="Скрыть: больше не показывать">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10 10 0 0 1 12 5c5 0 9 4.5 10 7a13 13 0 0 1-3 4.2M6.6 6.6A13 13 0 0 0 2 12c1 2.5 5 7 10 7a10 10 0 0 0 4.4-1"/></svg>
+        </button>
+      </div>
+      <div class="body">
+        <div class="meta-top">
+          <span class="badge"></span>
+          <button class="score" type="button" aria-label="Разбивка балла"></button>
+        </div>
+        <h3 class="title"><a target="_blank" rel="noopener noreferrer"></a></h3>
+        <p class="author"><button type="button" class="author-btn" title="Скрыть этого автора"></button></p>
+        <ul class="stats"></ul>
+        <div class="also"></div>
+        <div class="fav-extra" hidden>
+          <select class="fav-coll" aria-label="Коллекция"></select>
+          <textarea class="fav-note" rows="2" placeholder="Заметка: пластик, настройки…" aria-label="Заметка"></textarea>
+        </div>
+        <dl class="breakdown" hidden></dl>
+      </div>
+    </article>
+  </template>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

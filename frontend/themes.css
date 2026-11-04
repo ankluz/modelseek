@@ -1,0 +1,48 @@
+:root, [data-theme="plate"] {
+  --bg: #16171a; --bg-2: #1d1f23; --card: #222429; --line: #31343b;
+  --text: #ece8df; --muted: #9d9a92; --accent: #d9a441; --accent-ink: #1b1405;
+  --good: #8cc084; --warn: #e7b25d; --bad: #e5675e; --grid: rgba(236, 232, 223, .035);
+  color-scheme: dark;
+}
+[data-theme="latte"] {
+  --bg: #eff1f5; --bg-2: #e6e9ef; --card: #ffffff; --line: #ccd0da;
+  --text: #4c4f69; --muted: #6c6f85; --accent: #8839ef; --accent-ink: #ffffff;
+  --good: #40a02b; --warn: #df8e1d; --bad: #d20f39; --grid: rgba(76, 79, 105, .05);
+  color-scheme: light;
+}
+[data-theme="mocha"] {
+  --bg: #1e1e2e; --bg-2: #181825; --card: #262637; --line: #45475a;
+  --text: #cdd6f4; --muted: #a6adc8; --accent: #cba6f7; --accent-ink: #1e1e2e;
+  --good: #a6e3a1; --warn: #f9e2af; --bad: #f38ba8; --grid: rgba(205, 214, 244, .035);
+  color-scheme: dark;
+}
+[data-theme="nord"] {
+  --bg: #2e3440; --bg-2: #3b4252; --card: #353c4a; --line: #4c566a;
+  --text: #eceff4; --muted: #a3adbf; --accent: #88c0d0; --accent-ink: #2e3440;
+  --good: #a3be8c; --warn: #ebcb8b; --bad: #bf616a; --grid: rgba(236, 239, 244, .035);
+  color-scheme: dark;
+}
+[data-theme="dracula"] {
+  --bg: #282a36; --bg-2: #21222c; --card: #2f3241; --line: #44475a;
+  --text: #f8f8f2; --muted: #a0a8d4; --accent: #ff79c6; --accent-ink: #282a36;
+  --good: #50fa7b; --warn: #f1fa8c; --bad: #ff5555; --grid: rgba(248, 248, 242, .03);
+  color-scheme: dark;
+}
+[data-theme="gruvbox"] {
+  --bg: #282828; --bg-2: #32302f; --card: #3c3836; --line: #504945;
+  --text: #ebdbb2; --muted: #a89984; --accent: #fe8019; --accent-ink: #282828;
+  --good: #b8bb26; --warn: #fabd2f; --bad: #fb4934; --grid: rgba(235, 219, 178, .035);
+  color-scheme: dark;
+}
+[data-theme="tokyo"] {
+  --bg: #1a1b26; --bg-2: #16161e; --card: #1f2335; --line: #3b4261;
+  --text: #c0caf5; --muted: #8b93bf; --accent: #7aa2f7; --accent-ink: #1a1b26;
+  --good: #9ece6a; --warn: #e0af68; --bad: #f7768e; --grid: rgba(192, 202, 245, .035);
+  color-scheme: dark;
+}
+[data-theme="solarized"] {
+  --bg: #fdf6e3; --bg-2: #eee8d5; --card: #fffbf0; --line: #ddd6c1;
+  --text: #45575e; --muted: #7b8a8f; --accent: #cb4b16; --accent-ink: #fdf6e3;
+  --good: #859900; --warn: #b58900; --bad: #dc322f; --grid: rgba(88, 110, 117, .06);
+  color-scheme: light;
+}

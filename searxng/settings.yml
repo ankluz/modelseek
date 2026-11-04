@@ -1,0 +1,20 @@
+use_default_settings: true
+
+server:
+  secret_key: "change-me-to-a-random-hex-string"
+  limiter: false
+  image_proxy: false
+
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json
+
+engines:
+  - name: google
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: bing
+    disabled: false

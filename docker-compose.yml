@@ -1,0 +1,49 @@
+name: modelseek
+
+services:
+  modelseek:
+    build:
+      context: .
+      args:
+        EXTRAS: ${MODELSEEK_EXTRAS:-0}
+    image: modelseek:latest
+    container_name: modelseek
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MODELSEEK__TRANSLATE__URL: ${MODELSEEK_OLLAMA_URL:-http://ollama:11434/v1}
+      MODELSEEK__SOURCES__SEARXNG__URL: http://searxng:8080
+      MODELSEEK__NOTIFY__OPEN_URL: ${MODELSEEK_PUBLIC_URL:-http://127.0.0.1:8088}
+    ports:
+      - "${MODELSEEK_BIND:-127.0.0.1}:${MODELSEEK_PORT:-8088}:8000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - modelseek-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: modelseek-searxng
+    restart: unless-stopped
+    profiles: ["web"]
+    ports:
+      - "127.0.0.1:8089:8080"
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: modelseek-ollama
+    restart: unless-stopped
+    profiles: ["ollama"]
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  modelseek-data:
+  ollama:

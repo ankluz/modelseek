@@ -1,0 +1,118 @@
+server:
+  cache_ttl_seconds: 900
+  request_timeout_seconds: 10
+  per_source_limit: 24
+  user_agent: "modelseek/0.3 (local model search)"
+  data_dir: data
+
+breaker:
+  max_failures: 3
+  cooldown_minutes: 10
+
+ranking:
+  weights:
+    relevance: 0.40
+    semantic: 0.15
+    source_rank: 0.15
+    popularity: 0.20
+    freshness: 0.05
+    personal: 0.05
+  freshness_half_life_days: 365
+  downloads_factor: 0.3
+  dedupe: true
+  dedupe_images: false
+
+semantic:
+  enabled: false
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+
+translate:
+  enabled: false
+  url: http://127.0.0.1:11434/v1
+  model: qwen2.5:3b
+  api_key_env: ""
+
+filters:
+  exclude_words: []
+  min_likes: 0
+  free_only: false
+
+subscriptions:
+  check_every_seconds: 60
+  max_new_kept: 200
+
+notify:
+  kind: ""
+  url: ""
+  token_env: ""
+  chat_id: ""
+  open_url: http://127.0.0.1:8088
+
+browser:
+  headless: true
+  executable_path: ""
+  nav_timeout_seconds: 25
+
+impersonate:
+  target: chrome
+
+sources:
+  printables:
+    enabled: true
+    weight: 1.0
+    mode: http
+
+  makerworld:
+    enabled: true
+    weight: 1.0
+    mode: link
+
+  thingiverse:
+    enabled: true
+    weight: 0.8
+    mode: http
+    token_env: THINGIVERSE_TOKEN
+
+  thangs:
+    enabled: true
+    weight: 0.7
+    mode: link
+
+  cults3d:
+    enabled: true
+    weight: 0.8
+    mode: http
+    user_env: CULTS3D_USER
+    key_env: CULTS3D_API_KEY
+
+  myminifactory:
+    enabled: true
+    weight: 0.8
+    mode: http
+    key_env: MMF_API_KEY
+
+  searxng:
+    enabled: false
+    weight: 0.5
+    url: "http://127.0.0.1:8089"
+    sites:
+      - grabcad.com
+      - cgtrader.com
+      - pinshape.com
+      - free3d.com
+
+custom_sources: {}
+
+links:
+  yeggi:
+    label: Yeggi
+    url: "https://www.yeggi.com/q/{q}/"
+    color: "#ff9800"
+  grabcad:
+    label: GrabCAD
+    url: "https://grabcad.com/library?query={q}"
+    color: "#5c6bc0"
+  cgtrader:
+    label: CGTrader
+    url: "https://www.cgtrader.com/3d-print-models?keywords={q}"
+    color: "#26a69a"
