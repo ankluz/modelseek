@@ -154,6 +154,56 @@ def test_license_heuristic():
     assert license_allows_commercial(None) is None
 
 
+def test_license_does_not_match_inside_words():
+    for name in ("No commercial use", "Commercial use prohibited", "Commercial use not permitted",
+                 "CC-BY-NC-SA", "Attribution-NonCommercial-ShareAlike", "Personal Use", "Private use only"):
+        assert license_allows_commercial(name) is False, name
+    for name in ("CC-BY", "CC BY-SA", "CC0", "GPL 2.0", "GNU - LGPL", "MIT License", "BSD License",
+                 "Creative Commons Attribution licence 4.0", "Creative Commons - Attribution", "Commercial use allowed"):
+        assert license_allows_commercial(name) is True, name
+    for name in ("Limited license", "All rights reserved", "Standard Digital File", "Permitted for friends"):
+        assert license_allows_commercial(name) is None, name
+
+
+def test_exclude_matches_whole_words_and_forms():
+    titles = ["Fastest benchy", "Latest gear", "Contest trophy", "Test cube", "Tests pack", "Testing rig",
+              "Shopping cart", "Smart plug", "Card holder", "Catapult", "Location tag"]
+    def left(word):
+        return {h.title for h in apply_filters([hit(title=t) for t in titles], {"exclude": [word]})}
+    assert set(titles) - left("test") == {"Test cube", "Tests pack", "Testing rig"}
+    assert set(titles) - left("art") == set()
+    assert set(titles) - left("cat") == set()
+    assert set(titles) - left("cart") == {"Shopping cart"}
+
+
+def test_include_does_not_confuse_similar_words():
+    titles = ["Cast mold", "Phone case", "Phone cases", "Bold font", "M3 Bolt", "M3 bolts", "Benchy", "Bench vise"]
+    def kept(word):
+        return {h.title for h in apply_filters([hit(title=t) for t in titles], {"include": [word]})}
+    assert kept("case") == {"Phone case", "Phone cases"}
+    assert kept("bolt") == {"M3 Bolt", "M3 bolts"}
+    assert kept("benchy") == {"Benchy"}
+    assert relevance("bolt", hit(title="Bold font")) < 0.3
+
+
+def test_word_forms_still_match():
+    from app.ranking import stem
+    for a, b in (("holder", "holders"), ("gear", "gears"), ("box", "boxes"), ("mount", "mounted"), ("glass", "glass"),
+                 ("string", "strings"), ("headphone", "headphones"), ("наушники", "наушников"), ("держатель", "держателя")):
+        assert stem(a) == stem(b), (a, b)
+    for a, b in (("case", "cast"), ("bolt", "bold"), ("card", "cart"), ("bench", "benchy")):
+        assert stem(a) != stem(b), (a, b)
+
+
+def test_matches_query_needs_half_of_the_words():
+    from app.ranking import matches_query
+    assert matches_query("phone stand", hit(title="Orbit Phone Holder"))
+    assert matches_query("gridfinity", hit(title="SSD holder", tags=["Gridfinity"]))
+    assert not matches_query("benchy", hit(title="Quick-Release Bench Vise"))
+    assert matches_query("держатель", hit(title="Headphone holder"), alt_query="holder")
+    assert matches_query("!!", hit(title="Anything"))
+
+
 def test_parse_date_variants():
     assert parse_date("2025-01-01T00:00:00Z").year == 2025
     assert parse_date(1735689600000).year == 2025

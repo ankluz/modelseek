@@ -100,12 +100,14 @@ class Scheduler:
             return {"ok": False, "error": "уже выполняется" if sub else "нет такой подписки"}
         self._running.add(sid)
         try:
-            sp = SearchParams.from_dict({**sub["params"], "query": sub["query"], "page": 1})
+            sp = SearchParams.from_dict({**sub["params"], "query": sub["query"], "page": 1, "site_sort": "newest"})
             snap = await self.pipeline.final(sp, record_history=False)
             results = snap.get("results", [])
-            errors = [f"{s['label']}: {s.get('error')}" for s in snap.get("sources", []) if s["status"] == "error"]
-            first_run = sub["last_run"] is None
-            new = self.storage.record_sub_items(sid, results, first_run=first_run, keep=self.keep)
+            statuses = snap.get("sources", [])
+            errors = [f"{s['label']}: {s.get('error')}" for s in statuses if s["status"] in ("error", "challenge")]
+            first_run = not self.storage.sub_baseline(sid)
+            ok_sources = [s["name"] for s in statuses if s["status"] == "ok"]
+            new = self.storage.record_sub_items(sid, results, ok_sources, keep=self.keep)
             self.storage.mark_sub_run(sid, sub["interval_min"], "; ".join(errors) or None)
             if new:
                 new_items = self.storage.sub_items(sid, only_new=True)[:new]

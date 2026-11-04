@@ -81,7 +81,7 @@ class CustomSource(Source):
         return d
 
     def search_link(self, query: str) -> str | None:
-        return self._search_page.format(q=quote_plus(query)) if "{q}" in self._search_page else None
+        return self._search_page.replace("{q}", quote_plus(query)) if "{q}" in self._search_page else None
 
     async def search(self, fetcher, query, limit, page):
         vals = {"q": query, "limit": limit, "page": page, "page0": page - 1, "offset": (page - 1) * limit}

@@ -6,6 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from starlette.applications import Starlette
@@ -17,7 +18,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import installer
-from .config import EDITABLE, Settings, load_config
+from .config import EDITABLE, Settings, allowed_hosts, load_config
 from .fetchers import FetchUnavailable, origin_of
 from .pipeline import SearchParams
 from .ranking import SIGNALS
@@ -37,8 +38,26 @@ MODE_INFO = {
 }
 
 
+BAD_INPUT = (ValueError, TypeError, OverflowError)
+MAX_INTERVAL_MIN = 525600
+
+
 def err(msg: str, code: int = 400) -> JSONResponse:
     return JSONResponse({"error": msg}, status_code=code)
+
+
+def hostname(value: str | None, with_scheme: bool = False) -> str:
+    try:
+        return (urlsplit(value if with_scheme else f"//{value}").hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def parse_interval(value: Any) -> int:
+    minutes = int(value)
+    if not 1 <= minutes <= MAX_INTERVAL_MIN:
+        raise ValueError("interval_min вне диапазона")
+    return minutes
 
 
 async def body(request: Request) -> dict[str, Any]:
@@ -280,7 +299,10 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
         return JSONResponse(job.to_dict(since))
 
     def params(request: Request) -> SearchParams | JSONResponse:
-        sp = SearchParams.from_mapping(request.query_params, rt.cfg)
+        try:
+            sp = SearchParams.from_mapping(request.query_params, rt.cfg)
+        except BAD_INPUT as e:
+            return err(f"некорректный параметр запроса: {e}")
         if not sp.query:
             return err("пустой запрос")
         if len(sp.query) > 200:
@@ -341,6 +363,12 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
             hit = b.get("hit")
             if not isinstance(hit, dict) or not hit.get("source") or not hit.get("id"):
                 return err("нужен объект hit")
+            if not isinstance(hit.get("title"), str) or not hit["title"]:
+                return err("у hit нужно название")
+            if not str(hit.get("url") or "").startswith(("http://", "https://")):
+                return err("у hit нужна ссылка http(s)://")
+            if not isinstance(hit.get("tags", []), list):
+                return err("tags должен быть списком")
             S().add_favorite(hit, b.get("collection") or "Избранное", b.get("note") or "")
         elif request.method == "PATCH":
             if not b.get("key"):
@@ -397,8 +425,12 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
         query = (b.get("query") or "").strip()
         if not query:
             return err("нужен запрос")
-        sp = SearchParams.from_dict({**(b.get("params") or {}), "query": query, "page": 1})
-        sid = S().add_sub(query, sp.to_dict(), int(b.get("interval_min") or 1440))
+        try:
+            interval = parse_interval(b.get("interval_min") or 1440)
+            sp = SearchParams.from_dict({**(b.get("params") or {}), "query": query, "page": 1})
+        except BAD_INPUT as e:
+            return err(f"некорректные параметры подписки: {e}")
+        sid = S().add_sub(query, sp.to_dict(), interval)
         res = await rt.scheduler.run_sub(sid)
         return JSONResponse({"ok": True, "id": sid, "run": res, "sub": S().sub(sid)})
 
@@ -411,7 +443,11 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
             return JSONResponse({"ok": True})
         if request.method == "PATCH":
             b = await body(request)
-            S().update_sub(sid, b.get("interval_min"), b.get("enabled"))
+            try:
+                interval = None if b.get("interval_min") is None else parse_interval(b["interval_min"])
+            except BAD_INPUT as e:
+                return err(f"некорректные параметры подписки: {e}")
+            S().update_sub(sid, interval, b.get("enabled"))
         return JSONResponse({"sub": S().sub(sid)})
 
     async def api_sub_run(request: Request):
@@ -470,14 +506,24 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
 
-    class CsrfGuard(BaseHTTPMiddleware):
+    class RequestGuard(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
-            if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
-                if request.headers.get("x-modelseek") != "1":
-                    return err("missing X-Modelseek header", 403)
+            allowed = allowed_hosts(rt.cfg)
+            host = request.headers.get("host")
+            if hostname(host) not in allowed:
+                return err(f"адрес {host} не разрешён: добавьте его в server.allowed_hosts", 403)
+            if request.url.path.startswith("/api/"):
+                if request.headers.get("sec-fetch-site") in ("cross-site", "same-site"):
+                    return err("запрос с другого сайта отклонён", 403)
+                if request.method not in ("GET", "HEAD", "OPTIONS"):
+                    if request.headers.get("x-modelseek") != "1":
+                        return err("missing X-Modelseek header", 403)
+                    origin = request.headers.get("origin")
+                    if origin and hostname(origin, with_scheme=True) not in allowed:
+                        return err(f"источник {origin} не разрешён", 403)
             return await call_next(request)
 
-    app = Starlette(routes=routes, lifespan=lifespan, middleware=[Middleware(CsrfGuard)])
+    app = Starlette(routes=routes, lifespan=lifespan, middleware=[Middleware(RequestGuard)])
     app.state.runtime = rt
     return app
 

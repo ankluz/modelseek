@@ -17,9 +17,10 @@ class Thingiverse(Source):
     official_api = True
     secret_keys = ("token_env",)
     allowed_modes = ("http", "impersonate", "link")
+    native_sorts = {"newest": "newest", "likes": "popular", "downloads": "popular", "makes": "makes"}
 
-    async def search(self, fetcher, query, limit, page):
-        params = {"type": "things", "per_page": limit, "page": page, "sort": "relevant"}
+    async def search(self, fetcher, query, limit, page, sort=None):
+        params = {"type": "things", "per_page": limit, "page": page, "sort": sort or "relevant"}
         headers = {"Authorization": f"Bearer {self.secret('token_env')}"}
         data = self.check(await fetcher.get(API.format(q=quote(query, safe="")), params=params, headers=headers))
         hits = data.get("hits", []) if isinstance(data, dict) else data

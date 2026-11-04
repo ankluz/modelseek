@@ -18,8 +18,8 @@ if not exist ".venv\Scripts\pythonw.exe" (
 > "%TARGET%" echo @echo off
 >> "%TARGET%" echo cd /d "%~dp0"
 >> "%TARGET%" echo for /f "usebackq eol=# tokens=1,* delims==" %%%%A in (".env") do if not "%%%%B"=="" set "%%%%A=%%%%B"
->> "%TARGET%" echo start "" /min ".venv\Scripts\pythonw.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8088
+>> "%TARGET%" echo start "" /min ".venv\Scripts\pythonw.exe" -m app.background
 
 echo modelseek will start in the background when you sign in to Windows.
-echo Open http://127.0.0.1:8088 in a browser. To undo: autostart.bat remove
+echo Open http://127.0.0.1:8088 in a browser. Log: data\modelseek.log. To undo: autostart.bat remove
 pause

@@ -5,6 +5,7 @@ from .base import Source, SourceError
 
 API = "https://api.printables.com/graphql/"
 MEDIA = "https://media.printables.com/"
+THUMB_SIZE = "640x480"
 
 BASE_FIELDS = """
       id name slug likesCount downloadCount datePublished premium price
@@ -18,13 +19,23 @@ EXTRA_FIELDS = """
 """
 
 QUERY = """
-query SearchModels($query: String!, $limit: Int, $offset: Int) {
-  searchPrints2(query: $query, limit: $limit, offset: $offset) {
+query SearchModels($query: String!, $limit: Int, $offset: Int, $ordering: SearchChoicesEnum) {
+  searchPrints2(query: $query, limit: $limit, offset: $offset, ordering: $ordering) {
     totalCount
     items { %s }
   }
 }
 """
+
+
+def thumbnail_url(path: str | None) -> str | None:
+    if not path or str(path).startswith(("http", "data:")):
+        return path
+    folder, _, name = str(path).lstrip("/").rpartition("/")
+    stem, dot, ext = name.rpartition(".")
+    if not folder or not dot:
+        return MEDIA + str(path).lstrip("/")
+    return f"{MEDIA}{folder}/thumbs/inside/{THUMB_SIZE}/{ext.lower()}/{stem}.webp"
 
 
 class Printables(Source):
@@ -33,11 +44,12 @@ class Printables(Source):
     homepage = "https://www.printables.com"
     search_page = "https://www.printables.com/search/models?q={q}"
     color = "#fa6831"
+    native_sorts = {"newest": "latest", "likes": "popular", "downloads": "popular", "makes": "makes_count"}
 
     _extended_ok = True
 
-    async def search(self, fetcher, query, limit, page):
-        variables = {"query": query, "limit": limit, "offset": (page - 1) * limit}
+    async def search(self, fetcher, query, limit, page, sort=None):
+        variables = {"query": query, "limit": limit, "offset": (page - 1) * limit, "ordering": sort or "best_match"}
         if Printables._extended_ok:
             data = await self._run(fetcher, BASE_FIELDS + EXTRA_FIELDS, variables)
             if data.get("errors") and not first(data, "data.searchPrints2"):
@@ -68,7 +80,7 @@ class Printables(Source):
             id=mid,
             title=it.get("name") or "(без названия)",
             url=f"https://www.printables.com/model/{mid}-{slug}".rstrip("-"),
-            thumbnail=(MEDIA + img.lstrip("/")) if img and not str(img).startswith(("http", "data:")) else img,
+            thumbnail=thumbnail_url(img),
             author=first(it, "user.publicUsername", "user.handle"),
             likes=to_int(it.get("likesCount")),
             downloads=to_int(it.get("downloadCount")),

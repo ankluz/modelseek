@@ -43,7 +43,8 @@ class Translator:
         except Exception as e:
             self.error = f"{type(e).__name__}: {e}"[:200]
             return None
-        text = text.strip().strip('"\'`').splitlines()[0].strip()[:120]
+        lines = text.strip().splitlines() if isinstance(text, str) else []
+        text = lines[0].strip().strip('"\'`').strip()[:120] if lines else ""
         if not text or CYRILLIC.search(text):
             return None
         self.error = None

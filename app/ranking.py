@@ -19,12 +19,42 @@ def tokens(text: str) -> list[str]:
     return [t for t in TOKEN_RE.findall((text or "").lower()) if len(t) > 1 or t.isdigit()]
 
 
+CYRILLIC = re.compile(r"[а-яё]")
+RU_ENDINGS = tuple(sorted("""
+ями ами ого его ому ему ыми ими ов ев ей ой ый ий ая яя ое ее ые ие ам ям ах ях ом ем ую юю а я о е и ы у ю ь й
+""".split(), key=len, reverse=True))
+EN_SUFFIXES = (("ing", 4), ("ers", 4), ("ed", 4), ("er", 4), ("es", 3), ("s", 3))
+
+
+def stem(word: str) -> str:
+    if not word.isalpha():
+        return word
+    if CYRILLIC.search(word):
+        for ending in RU_ENDINGS:
+            if word.endswith(ending) and len(word) - len(ending) >= 3:
+                return word[:-len(ending)]
+        return word
+    for suffix, min_stem in EN_SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= min_stem and not word.endswith("ss"):
+            word = word[:-len(suffix)]
+            break
+    return word[:-1] if len(word) > 3 and word.endswith("e") else word
+
+
 def _token_hit(q: str, words: set[str]) -> float:
     if q in words:
         return 1.0
-    if len(q) >= 4 and any(w.startswith(q[:-1]) or q.startswith(w[:-1]) for w in words if len(w) >= 4):
-        return 0.8
-    return 0.0
+    target = stem(q)
+    return 0.8 if any(stem(w) == target for w in words) else 0.0
+
+
+def matches_query(query: str, hit: ModelHit, alt_query: str | None = None) -> bool:
+    words = set(tokens(hit.title)) | {t for tag in hit.tags for t in tokens(tag)}
+    for candidate in (query, alt_query):
+        parts = tokens(candidate or "")
+        if parts and sum(_token_hit(p, words) > 0 for p in parts) * 2 >= len(parts):
+            return True
+    return not tokens(query) and not tokens(alt_query or "")
 
 
 def relevance(query: str, hit: ModelHit) -> float:
@@ -141,8 +171,7 @@ def apply_filters(hits: Iterable[ModelHit], f: dict[str, Any], hidden: set[str] 
         if f["hide_seen"] and h.key in seen:
             continue
         words = set(tokens(h.title)) | {t for tag in h.tags for t in tokens(tag)}
-        title = (h.title or "").lower()
-        if f["exclude"] and any(_contains_word(words, w) or w in title for w in f["exclude"]):
+        if f["exclude"] and any(_contains_word(words, w) for w in f["exclude"]):
             continue
         if f["include"] and not all(_contains_word(words, w) for w in f["include"]):
             continue

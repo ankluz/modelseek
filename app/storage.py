@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS sub_known (sub_id INTEGER NOT NULL, key TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS sub_items (
     sub_id INTEGER NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, first_seen TEXT NOT NULL,
     is_new INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (sub_id, key));
+CREATE TABLE IF NOT EXISTS sub_sources (sub_id INTEGER NOT NULL, source TEXT NOT NULL, PRIMARY KEY (sub_id, source));
 """
 
 BUILTIN_PRESETS: list[dict[str, Any]] = [
@@ -103,7 +104,16 @@ class Storage:
         return [{"name": r["collection"], "count": r["n"]} for r in rows]
 
     def favorite_hits(self) -> list[ModelHit]:
-        return [ModelHit.from_dict(d) for d in self.favorites()]
+        out = []
+        for d in self.favorites():
+            try:
+                hit = ModelHit.from_dict(d)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(hit.title, str):
+                hit.tags = [t for t in hit.tags if isinstance(t, str)] if isinstance(hit.tags, list) else []
+                out.append(hit)
+        return out
 
     def hide(self, key: str, title: str = "") -> None:
         self._x("INSERT OR REPLACE INTO hidden(key, title, added_at) VALUES(?,?,?)", (key, title, now_iso()))
@@ -174,6 +184,7 @@ class Storage:
     def delete_sub(self, sid: int) -> None:
         self._x("DELETE FROM sub_items WHERE sub_id=?", (sid,))
         self._x("DELETE FROM sub_known WHERE sub_id=?", (sid,))
+        self._x("DELETE FROM sub_sources WHERE sub_id=?", (sid,))
         self._x("DELETE FROM subs WHERE id=?", (sid,))
 
     def _sub_row(self, r: sqlite3.Row) -> dict[str, Any]:
@@ -202,9 +213,13 @@ class Storage:
         self._x("UPDATE subs SET last_run=?, next_run=?, last_error=? WHERE id=?",
                 (now.isoformat(timespec="seconds"), nxt.isoformat(timespec="seconds"), error, sid))
 
-    def record_sub_items(self, sid: int, hits: list[dict[str, Any]], first_run: bool, keep: int = 200) -> int:
+    def sub_baseline(self, sid: int) -> set[str]:
+        return {r["source"] for r in self._q("SELECT source FROM sub_sources WHERE sub_id=?", (sid,))}
+
+    def record_sub_items(self, sid: int, hits: list[dict[str, Any]], ok_sources: list[str], keep: int = 200) -> int:
         known = {r["key"] for r in self._q("SELECT key FROM sub_items WHERE sub_id=?", (sid,))}
         known |= {r["key"] for r in self._q("SELECT key FROM sub_known WHERE sub_id=?", (sid,))}
+        baseline = self.sub_baseline(sid)
         new = 0
         now = now_iso()
         with self._lock:
@@ -216,9 +231,12 @@ class Storage:
                 if not key or any(k in known for k in group):
                     continue
                 data = {k: v for k, v in h.items() if k not in ("breakdown",)}
+                is_new = int(any(k and k.split(":", 1)[0] in baseline for k in group))
                 self._db.execute("INSERT INTO sub_items(sub_id, key, data, first_seen, is_new) VALUES(?,?,?,?,?)",
-                                 (sid, key, json.dumps(data, ensure_ascii=False), now, 0 if first_run else 1))
-                new += 0 if first_run else 1
+                                 (sid, key, json.dumps(data, ensure_ascii=False), now, is_new))
+                new += is_new
+            self._db.executemany("INSERT OR IGNORE INTO sub_sources(sub_id, source) VALUES(?,?)",
+                                 [(sid, s) for s in ok_sources])
             self._db.execute("""DELETE FROM sub_items WHERE sub_id=? AND is_new=0 AND key NOT IN (
                 SELECT key FROM sub_items WHERE sub_id=? ORDER BY first_seen DESC LIMIT ?)""", (sid, sid, keep))
             self._db.commit()

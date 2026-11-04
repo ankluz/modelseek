@@ -19,10 +19,37 @@ def test_printables():
     hits = run(Printables({}))
     a, b = hits
     assert a.url == "https://www.printables.com/model/101-headphone-holder"
-    assert a.thumbnail == "https://media.printables.com/media/prints/101/img.webp"
+    assert a.thumbnail == "https://media.printables.com/media/prints/101/thumbs/inside/640x480/webp/img.webp"
     assert a.author == "maker_anna" and a.likes == 900 and a.price == 0.0 and a.tags == ["headphones", "desk"]
     assert a.makes == 12 and a.license == "CC BY" and a.commercial is True
     assert b.price == 3.5 and b.position == 1
+
+
+def test_printables_thumbnail_keeps_original_format_folder():
+    from app.sources.printables import thumbnail_url
+    assert thumbnail_url("media/prints/1/images/2/a.PNG") == \
+        "https://media.printables.com/media/prints/1/images/2/thumbs/inside/640x480/png/a.webp"
+    assert thumbnail_url("https://cdn/a.jpg") == "https://cdn/a.jpg"
+    assert thumbnail_url(None) is None
+    assert thumbnail_url("noext") == "https://media.printables.com/noext"
+
+
+def test_printables_sends_native_ordering():
+    import json as _json
+    seen = []
+
+    def handler(req):
+        seen.append(_json.loads(req.content)["variables"]["ordering"])
+        return httpx.Response(200, json={"data": {"searchPrints2": {"items": []}}})
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            await Printables({}).search(HttpFetcher(c), "x", 5, 1)
+            await Printables({}).search(HttpFetcher(c), "x", 5, 1, sort="latest")
+
+    asyncio.run(go())
+    assert seen == ["best_match", "latest"]
+    assert Printables({}).native_sort("newest") == "latest" and Printables({}).native_sort("score") is None
 
 
 def test_printables_falls_back_when_schema_changes():

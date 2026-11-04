@@ -16,6 +16,7 @@ DEFAULTS: dict[str, Any] = {
         "per_source_limit": 24,
         "user_agent": "modelseek/0.3 (local model search)",
         "data_dir": "data",
+        "allowed_hosts": [],
     },
     "breaker": {"max_failures": 3, "cooldown_minutes": 10},
     "browser": {"headless": True, "executable_path": "", "nav_timeout_seconds": 25},
@@ -42,6 +43,16 @@ EDITABLE = ("server", "breaker", "browser", "impersonate", "ranking", "semantic"
             "subscriptions", "notify", "sources", "custom_sources", "links")
 
 ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+LOCKED = (("browser", "executable_path"), ("server", "allowed_hosts"), ("server", "data_dir"))
+
+
+def allowed_hosts(cfg: dict[str, Any]) -> set[str]:
+    extra = (cfg.get("server") or {}).get("allowed_hosts") or []
+    if isinstance(extra, str):
+        extra = extra.split(",")
+    return set(LOOPBACK_HOSTS) | {str(h).strip().lower() for h in extra if str(h).strip()}
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -123,13 +134,50 @@ class Settings:
         bad = [k for k in patch if k not in EDITABLE]
         if bad:
             raise ValueError("нельзя менять разделы: " + ", ".join(bad))
+        bad = [k for k, v in patch.items() if not isinstance(v, dict)]
+        if bad:
+            raise ValueError("раздел должен быть объектом: " + ", ".join(bad))
         with self._lock:
+            current = self.effective()
             ov = self.overrides()
             ov = _merge_keep_null(ov, patch)
             candidate = _merge(self.base(), ov)
             validate(candidate)
+            self._check_protected(current, candidate)
             self._write_overrides(ov)
         return candidate
+
+    def _check_protected(self, current: dict[str, Any], candidate: dict[str, Any]) -> None:
+        def get(cfg: dict[str, Any], section: str, key: str) -> Any:
+            sec = cfg.get(section)
+            return (sec.get(key) if isinstance(sec, dict) else None) or ""
+
+        for section, key in LOCKED:
+            if get(current, section, key) != get(candidate, section, key):
+                raise ValueError(f"{section}.{key}: задаётся только в config.yaml или переменной окружения")
+
+        site_keys = {str(sc[k]) for sc in (candidate.get("sources") or {}).values() if isinstance(sc, dict)
+                     for k in ("token_env", "key_env", "user_env") if sc.get(k)}
+        own_keys = set(self._read_secrets()) | self._dotenv_names()
+        sinks = (("translate", "api_key_env", ("url",)), ("notify", "token_env", ("url", "kind")))
+        for section, key, fields in sinks:
+            name = str(get(candidate, section, key))
+            if not name or (section == "notify" and get(candidate, section, "kind") == "telegram"):
+                continue
+            if all(get(current, section, f) == get(candidate, section, f) for f in (key, *fields)):
+                continue
+            if name in site_keys:
+                raise ValueError(f"{section}.{key}: ключ сайта нельзя отправлять на другой адрес")
+            if os.environ.get(name) and name not in own_keys:
+                raise ValueError(f"{section}.{key}: {name} — переменная окружения системы, а не ключ modelseek. "
+                                 "Укажите другое имя или задайте её в config.yaml")
+
+    def _dotenv_names(self) -> set[str]:
+        path = self.config_path.parent / ".env"
+        if not path.exists():
+            return set()
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return {ln.split("=", 1)[0].strip() for ln in lines if "=" in ln and not ln.lstrip().startswith("#")}
 
     def reset(self, section: str | None = None) -> None:
         with self._lock:
@@ -235,6 +283,14 @@ def validate(cfg: dict[str, Any]) -> None:
             raise ValueError(f"custom_sources.{name}.url: нужен адрес http(s)://")
         if mode == "link" and "{q}" not in str(sc.get("search_page", "")):
             raise ValueError(f"custom_sources.{name}.search_page: нужен адрес с {{q}}")
+        if sc.get("search_page") and not str(sc["search_page"]).startswith(("http://", "https://")):
+            raise ValueError(f"custom_sources.{name}.search_page: нужен адрес http(s)://")
     for name, sc in (cfg.get("links") or {}).items():
         if "{q}" not in str(sc.get("url", "")):
             raise ValueError(f"links.{name}.url: адрес должен содержать {{q}} — туда подставится запрос")
+        if not str(sc.get("url", "")).startswith(("http://", "https://")):
+            raise ValueError(f"links.{name}.url: нужен адрес http(s)://")
+    for section, key in (("translate", "api_key_env"), ("notify", "token_env")):
+        name = (cfg.get(section) or {}).get(key)
+        if name and not ENV_NAME.match(str(name)):
+            raise ValueError(f"{section}.{key}: имя переменной ЗАГЛАВНЫМИ_БУКВАМИ")

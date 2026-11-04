@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, field
@@ -7,7 +8,7 @@ from typing import Any
 
 from .engine import Engine
 from .imagededupe import ImageDeduper
-from .ranking import SIGNALS, Profile, apply_filters, facets, normalize_filters, rank, sort_hits
+from .ranking import SIGNALS, Profile, apply_filters, facets, matches_query, normalize_filters, rank, sort_hits
 from .semantic import Embedder
 from .storage import Storage
 from .translate import Translator
@@ -18,9 +19,10 @@ FILTER_KEYS = ("price", "max_price", "min_likes", "min_downloads", "min_makes", 
 
 def _float(v: Any, default: float) -> float:
     try:
-        return float(v) if v not in (None, "") else default
+        value = float(v) if v not in (None, "") else default
     except (TypeError, ValueError):
         return default
+    return value if value is None or math.isfinite(value) else default
 
 
 @dataclass
@@ -34,6 +36,13 @@ class SearchParams:
     half_life: float | None = None
     filters: dict[str, Any] = field(default_factory=dict)
     dedupe: bool = True
+    site_sort: str | None = None
+
+    @property
+    def site_order(self) -> str:
+        if self.site_sort:
+            return self.site_sort
+        return "newest" if self.filters.get("days") else self.sort
 
     @classmethod
     def from_mapping(cls, p: Any, cfg: dict[str, Any]) -> "SearchParams":
@@ -62,6 +71,14 @@ class SearchParams:
     def from_dict(cls, d: dict[str, Any]) -> "SearchParams":
         known = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
         sp = cls(**known)
+        for name in ("weights", "source_weights", "filters"):
+            if not isinstance(getattr(sp, name), dict):
+                raise ValueError(f"{name} должен быть объектом")
+        if sp.sources is not None and not isinstance(sp.sources, list):
+            raise ValueError("sources должен быть списком")
+        sp.weights = {str(k): _float(v, 0.0) for k, v in sp.weights.items()}
+        sp.source_weights = {str(k): _float(v, 1.0) for k, v in sp.source_weights.items()}
+        sp.half_life = _float(sp.half_life, None)
         sp.filters = normalize_filters(sp.filters)
         return sp
 
@@ -92,9 +109,14 @@ class Pipeline:
         profile = Profile.from_hits(self.storage.favorite_hits()) if sp.weights.get("personal", 0) > 0 else None
         source_weights = {n: s.weight for n, s in self.engine.sources.items()} | sp.source_weights
         sem_cache: dict[str, float] = {}
+        names = self._names(sp)
+        order = sp.site_order
+        unranked = {n for n in names if self.engine.sources[n].native_sort(order)}
+        alt_query = sp.query if translated else None
 
-        async for hits, statuses, done in self.engine.stream(site_query, self._names(sp), sp.page):
-            filtered = apply_filters(hits, sp.filters, hidden, seen)
+        async for hits, statuses, done in self.engine.stream(site_query, names, sp.page, order):
+            on_topic = [h for h in hits if h.source not in unranked or matches_query(site_query, h, alt_query)]
+            filtered = apply_filters(on_topic, sp.filters, hidden, seen)
             todo = [h for h in filtered if h.key not in sem_cache]
             if todo:
                 scores = await self.embedder.scores(sp.query, todo)
@@ -105,7 +127,7 @@ class Pipeline:
                           half_life_days=sp.half_life or r["freshness_half_life_days"],
                           downloads_factor=r["downloads_factor"],
                           do_dedupe=sp.dedupe and r["dedupe"], semantic=semantic, profile=profile,
-                          alt_query=sp.query if translated else None)
+                          alt_query=alt_query)
             if done and sp.dedupe:
                 ranked = await self.deduper.merge(ranked)
             topics = facets(ranked, site_query) if sp.page == 1 else []

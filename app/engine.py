@@ -106,7 +106,8 @@ class Engine:
     def timeout_for(self, src: Source) -> float:
         return self.timeout * 4 if src.mode == "browser" else self.timeout
 
-    async def _one(self, src: Source, query: str, page: int) -> tuple[list[ModelHit], dict[str, Any]]:
+    async def _one(self, src: Source, query: str, page: int,
+                   order: str | None = None) -> tuple[list[ModelHit], dict[str, Any]]:
         st: dict[str, Any] = {"name": src.name, "label": src.label, "mode": src.mode,
                               "status": "ok", "count": 0, "ms": 0, "link": src.search_link(query)}
         if src.mode == "link":
@@ -119,7 +120,8 @@ class Engine:
         if until:
             st.update(status="paused", error=f"отключён до {until:%H:%M} после нескольких ошибок подряд")
             return [], st
-        key = (src.name, query.lower().strip(), page)
+        native = src.native_sort(order)
+        key = (src.name, query.lower().strip(), page, native)
         cached = self.cache.get(key)
         if cached is not None:
             st.update(count=len(cached), cached=True)
@@ -129,7 +131,9 @@ class Engine:
         hits: list[ModelHit] = []
         try:
             fetcher = self.fetcher_for(src)
-            hits = await asyncio.wait_for(src.search(fetcher, query, self.limit, page), self.timeout_for(src))
+            kwargs = {"sort": native} if native else {}
+            found = await asyncio.wait_for(src.search(fetcher, query, self.limit, page, **kwargs), self.timeout_for(src))
+            hits = [h for h in found if h.url.startswith(("http://", "https://"))]
             self.cache.set(key, [h.copy() for h in hits])
             self.breaker.ok(src.name)
             st["count"] = len(hits)
@@ -153,7 +157,7 @@ class Engine:
         st["ms"] = round((time.perf_counter() - t0) * 1000)
         return hits, st
 
-    async def stream(self, query: str, names: list[str], page: int = 1
+    async def stream(self, query: str, names: list[str], page: int = 1, order: str | None = None
                      ) -> AsyncIterator[tuple[list[ModelHit], list[dict[str, Any]], bool]]:
         chosen = [self.sources[n] for n in names if n in self.sources]
         statuses: dict[str, dict[str, Any]] = {
@@ -161,7 +165,7 @@ class Engine:
                      "link": s.search_link(query)} for s in chosen
         }
         hits: list[ModelHit] = []
-        tasks = {asyncio.ensure_future(self._one(s, query, page)): s.name for s in chosen}
+        tasks = {asyncio.ensure_future(self._one(s, query, page, order)): s.name for s in chosen}
         if not tasks:
             yield [], [], True
             return

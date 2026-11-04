@@ -4,6 +4,8 @@ server:
   per_source_limit: 24
   user_agent: "modelseek/0.3 (local model search)"
   data_dir: data
+  # Имена, по которым можно открывать modelseek, кроме 127.0.0.1 и localhost
+  allowed_hosts: []
 
 breaker:
   max_failures: 3

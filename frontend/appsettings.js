@@ -532,7 +532,7 @@ function sectionServer() {
     timeout: num(sv.request_timeout_seconds, { min: 1, max: 120 }), limit: num(sv.per_source_limit, { min: 1, max: 100 }),
     ttl: num(sv.cache_ttl_seconds, { min: 0, max: 86400 }), ua: text(sv.user_agent),
     fails: num(br.max_failures, { min: 0, max: 100 }), cool: num(br.cooldown_minutes, { min: 0, max: 1440 }),
-    exe: text(bw.executable_path, { placeholder: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" }),
+    exe: text(bw.executable_path, { placeholder: "встроенный Chromium Playwright", readonly: true }),
     nav: num(bw.nav_timeout_seconds, { min: 5, max: 120 }), target: text(im.target),
   };
   const headless = check(bw.headless, "Браузер без окна (окно открывается только для проверки)");
@@ -549,9 +549,9 @@ function sectionServer() {
       saveRow("Сохранить", () => patch({ server: { request_timeout_seconds: Number(i.timeout.value), per_source_limit: Number(i.limit.value),
         cache_ttl_seconds: Number(i.ttl.value), user_agent: i.ua.value.trim() }, breaker: { max_failures: Number(i.fails.value), cooldown_minutes: Number(i.cool.value) } }))),
     panel("Режимы browser и impersonate", null, headless.node,
-      field("Свой Chrome/Edge вместо встроенного Chromium", i.exe, "Пусто — встроенный Chromium Playwright."),
+      field("Свой Chrome/Edge вместо встроенного Chromium", i.exe, "Задаётся только в config.yaml (browser.executable_path): так чужая страница не сможет подменить запускаемую программу."),
       el("div", { class: "fields-grid" }, field("Загрузка страницы, с", i.nav), field("Отпечаток curl_cffi", i.target, "chrome, edge, safari…")),
-      saveRow("Сохранить", () => patch({ browser: { headless: headless.input.checked, executable_path: i.exe.value.trim(), nav_timeout_seconds: Number(i.nav.value) },
+      saveRow("Сохранить", () => patch({ browser: { headless: headless.input.checked, nav_timeout_seconds: Number(i.nav.value) },
         impersonate: { target: i.target.value.trim() || "chrome" } }))),
     panel("Файлы", "Интерфейс не переписывает config.yaml — изменения лежат отдельно и перекрывают его.",
       el("ul", { class: "status-list" },

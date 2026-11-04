@@ -12,6 +12,7 @@ from .fixtures import router
 H = {"X-Modelseek": "1"}
 
 CFG = _merge(DEFAULTS, {
+    "server": {"allowed_hosts": ["testserver"]},
     "sources": {
         "printables": {"enabled": True, "weight": 1.0, "mode": "http"},
         "makerworld": {"enabled": True, "weight": 1.0, "mode": "http"},

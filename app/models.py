@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any
@@ -61,17 +62,22 @@ class ModelHit:
         return cls(**data)
 
 
-_NONCOMMERCIAL = ("nc", "non-commercial", "noncommercial", "personal use", "non commercial")
-_COMMERCIAL = ("cc0", "public domain", "cc by", "cc-by", "commercial", "mit", "gpl", "bsd")
+_NONCOMMERCIAL = re.compile(
+    r"\bnc\b|non[- ]?commercial|\b(?:personal|private) use|\b(?:no|not) commercial|not for (?:commercial|resale|sale)"
+    r"|(?:without|prohibits?|forbids?) commercial|commercial (?:use )?(?:is )?(?:not|prohibited|forbidden|disallowed)")
+_COMMERCIAL = re.compile(
+    r"\bcc0\b|\bcc[- ]?zero\b|public domain|\bcc[- ]?by\b|creative commons\W+(?:\d\S*\W+)?attribution"
+    r"|\bmit\b|\b[al]?gpl\b|\bbsd\b|\bapache\b|commercial use (?:is )?(?:allowed|permitted|ok)"
+    r"|^commercial(?: licen[cs]e)?$")
 
 
 def license_allows_commercial(name: str | None) -> bool | None:
     if not name:
         return None
-    n = name.lower()
-    if any(x in n for x in _NONCOMMERCIAL):
+    n = re.sub(r"[\s_]+", " ", name.lower()).strip()
+    if _NONCOMMERCIAL.search(n):
         return False
-    if any(x in n for x in _COMMERCIAL):
+    if _COMMERCIAL.search(n):
         return True
     return None
 

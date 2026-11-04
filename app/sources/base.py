@@ -28,6 +28,7 @@ class Source:
     default_mode: ClassVar[str] = "http"
     allowed_modes: ClassVar[tuple[str, ...]] = MODES
     secret_keys: ClassVar[tuple[str, ...]] = ()
+    native_sorts: ClassVar[dict[str, str]] = {}
 
     def __init__(self, cfg: dict[str, Any]):
         self.cfg = cfg or {}
@@ -49,8 +50,11 @@ class Source:
     def configured(self) -> bool:
         return not self.missing_secrets
 
+    def native_sort(self, order: str | None) -> str | None:
+        return self.native_sorts.get(order) if order else None
+
     def search_link(self, query: str) -> str | None:
-        return self.search_page.format(q=quote_plus(query)) if self.search_page else None
+        return self.search_page.replace("{q}", quote_plus(query)) if self.search_page else None
 
     def info(self) -> dict[str, Any]:
         return {
@@ -108,7 +112,7 @@ class LinkSource(Source):
         return d
 
     def search_link(self, query: str) -> str | None:
-        return self._url.format(q=quote_plus(query)) if self._url else None
+        return self._url.replace("{q}", quote_plus(query)) if self._url else None
 
     @property
     def name(self) -> str:
