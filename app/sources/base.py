@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
 from urllib.parse import quote_plus
 
@@ -18,6 +20,22 @@ class ChallengeError(SourceError):
     pass
 
 
+@dataclass
+class GuestAccess:
+    """A search by a visitor of the public profile.
+
+    keys: the visitor's own keys, {source: {secret field: value}}, kept in their browser.
+    lend: whether the owner's keys may fill in what the visitor did not give.
+    fetched: answers the visitor's browser got from a site itself, {source: (request, FetchResult)}.
+    """
+    keys: dict[str, dict[str, str]] = field(default_factory=dict)
+    lend: bool = False
+    fetched: dict[str, Any] = field(default_factory=dict)
+
+
+GUEST: ContextVar[GuestAccess | None] = ContextVar("modelseek_guest", default=None)
+
+
 class Source:
     name: ClassVar[str] = ""
     label: ClassVar[str] = ""
@@ -28,6 +46,8 @@ class Source:
     default_mode: ClassVar[str] = "http"
     allowed_modes: ClassVar[tuple[str, ...]] = MODES
     secret_keys: ClassVar[tuple[str, ...]] = ()
+    # The site answers scripts on other sites (CORS), so a guest's browser may ask it directly
+    browser_direct: ClassVar[bool] = False
     native_sorts: ClassVar[dict[str, str]] = {}
 
     def __init__(self, cfg: dict[str, Any]):
@@ -38,7 +58,20 @@ class Source:
         self.mode = mode if mode in self.allowed_modes else self.default_mode
 
     def secret(self, key: str) -> str | None:
+        guest = GUEST.get()
+        if guest is not None:
+            own = (guest.keys.get(self.name) or {}).get(key)
+            if own:
+                return own
+            if not guest.lend:
+                return None
         return env(self.cfg.get(key))
+
+    def guest_keyed(self) -> bool:
+        """Every key this source needs comes from the current guest (nothing of the owner's is used)."""
+        guest = GUEST.get()
+        own = (guest.keys.get(self.name) or {}) if guest is not None else {}
+        return all(own.get(k) for k in self.secret_keys)
 
     @property
     def missing_secrets(self) -> list[str]:

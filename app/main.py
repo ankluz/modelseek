@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -13,13 +15,15 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import installer
+from . import dockernet, installer, source
 from .config import EDITABLE, Settings, allowed_hosts, load_config
 from .fetchers import FetchUnavailable, origin_of
+from .models import clean_hit
+from .netguard import BlockedRequest, Resolver, ResponseTooLarge
 from .pipeline import SearchParams
 from .ranking import SIGNALS
 from .runtime import Runtime
@@ -53,6 +57,75 @@ def hostname(value: str | None, with_scheme: bool = False) -> str:
         return ""
 
 
+def same_origin(origin: str | None, request: Request) -> bool:
+    """Origin must name this very server: host and port. 127.0.0.1:8090 is another site for 127.0.0.1:8088."""
+    try:
+        o = urlsplit(origin or "")
+        h = urlsplit(f"//{request.headers.get('host', '')}")
+        default = {"http": 80, "https": 443}
+        oport = o.port or default.get(o.scheme)
+        hport = h.port or default.get(request.url.scheme)
+    except ValueError:
+        return False
+    return (o.scheme in default and bool(o.hostname) and o.hostname.lower() == (h.hostname or "").lower()
+            and oport == hport)
+
+
+SAFE_STATIC = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*(?:/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)*")
+
+
+class SafeStatic(StaticFiles):
+    """Only plain names: Windows also opens INDEX~1.HTM, index.html::$DATA and "file." as other spellings."""
+
+    async def get_response(self, path: str, scope):
+        root, full = scope.get("root_path", ""), scope["path"]
+        asked = full[len(root):] if root and full.startswith(root) else full  # the URL path, before normpath
+        if not SAFE_STATIC.fullmatch(asked.strip("/")):
+            return err("нет такого файла", 404)
+        return await super().get_response(path, scope)
+
+
+MAX_BODY = 256 * 1024
+
+
+class BodyLimit:
+    """Refuse request bodies over `limit` bytes, declared or streamed, before anyone reads them.
+    `paths` gives single routes their own limit."""
+
+    def __init__(self, app, limit: int = MAX_BODY, paths: dict[str, int] | None = None):
+        self.app, self.default, self.paths = app, limit, dict(paths or {})
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        limit = self.paths.get(scope.get("path", ""), self.default)
+        declared = dict(scope.get("headers") or []).get(b"content-length", b"0")
+        if not declared.isdigit() or int(declared) > limit:
+            return await err("слишком большой запрос", 413)(scope, receive, send)
+        # Read the whole (small) body up front: an over-long stream is answered here, never handed on.
+        chunks, seen = [], 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                return  # client went away
+            chunks.append(message.get("body", b""))
+            seen += len(chunks[-1])
+            if seen > limit:
+                return await err("слишком большой запрос", 413)(scope, receive, send)
+            if not message.get("more_body"):
+                break
+        replay = {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+
+        async def buffered():
+            nonlocal replay
+            if replay is not None:
+                message, replay = replay, None
+                return message
+            return await receive()
+
+        await self.app(scope, buffered, send)
+
+
 def parse_interval(value: Any) -> int:
     minutes = int(value)
     if not 1 <= minutes <= MAX_INTERVAL_MIN:
@@ -75,22 +148,93 @@ def secret_names(cfg: dict[str, Any]) -> list[str]:
             for k in ("token_env", "key_env", "user_env"):
                 if isinstance(sc, dict) and sc.get(k):
                     names.append(str(sc[k]))
-    for path in (("translate", "api_key_env"), ("notify", "token_env")):
+    for path in (("translate", "api_key_env"), ("notify", "token_env"), ("public", "password_env")):
         v = (cfg.get(path[0]) or {}).get(path[1])
         if v:
             names.append(str(v))
     return sorted(set(names))
 
 
+CSP = "; ".join((
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
+    "img-src 'self' https: http: data: blob:",
+    "connect-src 'self'",
+    "form-action 'self' https:",
+    "frame-src 'none'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+))
+SECURITY_HEADERS = {
+    "Content-Security-Policy": CSP,
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()",
+}
+
+
+def page_html(profile: str) -> HTMLResponse:
+    """index.html with the profile marked on <html>, so boot.js picks the right storage before any request."""
+    text = (STATIC / "index.html").read_text(encoding="utf-8")
+    text = text.replace('<html lang="ru">', f'<html lang="ru" data-profile="{profile}">', 1)
+    return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
+
+
+def source_response() -> Response:
+    return Response(source.archive(), media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="modelseek-source.zip"'})
+
+
+PROXY_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip")
+
+
+def from_this_machine(request: Request) -> bool:
+    """The admin profile answers only to this computer, and never through a proxy.
+
+    In Docker the port is published on the host's 127.0.0.1 only and arrives from Docker's gateway;
+    other containers on the same network have their own addresses and are refused.
+    """
+    if any(h in request.headers for h in PROXY_HEADERS):
+        return False
+    host = request.client.host if request.client else ""
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return True  # unix socket or in-process test client
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    if ip.is_loopback:
+        return True
+    if dockernet.IN_DOCKER:
+        gws = dockernet.gateways()
+        return ip in gws if gws else True
+    return False
+
+
 def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTransport | None = None,
                db_path: str | None = None, start_scheduler: bool = True,
-               config_path: str | None = None, data_dir: str | None = None) -> Starlette:
-    base_for_dir = cfg if cfg is not None else load_config(config_path)
-    settings = Settings(cfg, config_path, data_dir or base_for_dir["server"]["data_dir"])
-    rt = Runtime(settings, transport=transport, db_path=db_path, start_scheduler=start_scheduler)
+               config_path: str | None = None, data_dir: str | None = None,
+               resolver: Resolver | None = None, runtime: Runtime | None = None) -> Starlette:
+    """The admin profile. With `runtime` the caller owns it (app.serve shares one runtime with the public app)."""
+    if runtime is None:
+        base_for_dir = cfg if cfg is not None else load_config(config_path)
+        settings = Settings(cfg, config_path, data_dir or base_for_dir["server"]["data_dir"])
+        rt = Runtime(settings, transport=transport, db_path=db_path, start_scheduler=start_scheduler,
+                     resolver=resolver)
+    else:
+        rt, settings = runtime, runtime.settings
 
     @asynccontextmanager
     async def lifespan(app):
+        if runtime is not None:
+            yield
+            return
         await rt.start()
         try:
             yield
@@ -108,17 +252,24 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
             out.append(info)
         return JSONResponse({"sources": out, "browser": rt.engine.browser.status()})
 
-    def features() -> dict[str, Any]:
-        return {
-            "semantic": rt.embedder.status(),
-            "translate": rt.translator.status(),
-            "image_dedupe": rt.deduper.status(),
-            "notify": {"kind": rt.notifier.kind, "enabled": rt.notifier.enabled},
-        }
+    features = rt.features
+
+    def public_status() -> dict[str, Any]:
+        p = rt.cfg.get("public") or {}
+        name = str(p.get("password_env") or "")
+        return {"enabled": bool(p.get("enabled")), "host": p.get("host"), "port": p.get("port"),
+                "auth": p.get("auth", "none"), "allow_from": p.get("allow_from") or [],
+                "password_env": name, "password_set": bool(name and os.environ.get(name)),
+                "searches_per_minute": p.get("searches_per_minute"), "sources": p.get("sources") or [],
+                "lend_keys": bool(p.get("lend_keys")), "docker": dockernet.IN_DOCKER,
+                "addresses_hidden": bool(getattr(rt, "public_addresses_hidden", False)),
+                "running": bool(getattr(rt, "public_running", False))}
 
     async def api_config(request: Request):
         r = rt.cfg["ranking"]
         return JSONResponse({
+            "profile": "admin",
+            "source_url": str((rt.cfg.get("public") or {}).get("source_url") or "") or "/source.zip",
             "weights": {k: r["weights"].get(k, 0) for k in SIGNALS},
             "freshness_half_life_days": r["freshness_half_life_days"],
             "filters": rt.cfg["filters"],
@@ -151,6 +302,7 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
             "builtin": builtin,
             "modes": MODE_INFO,
             "features": features(),
+            "public": public_status(),
             "paths": {"config": str(settings.config_path.resolve()),
                       "overrides": str(settings.overrides_path.resolve()),
                       "secrets": str(settings.secrets_path.resolve())},
@@ -201,6 +353,7 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
             return JSONResponse({"ok": True, "link": src.search_link(query), "count": 0, "sample": []})
         out: dict[str, Any] = {"ok": False}
         try:
+            rt.guard.trust(str(conf.get("url") or ""), str(conf.get("homepage") or ""))
             fetcher = rt.engine.fetcher_for(src)
             vals = {"q": query, "limit": 10, "page": 1, "page0": 0, "offset": 0}
             from .sources.custom import _fill_body, _fill_url
@@ -224,8 +377,9 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
             out["fields_available"] = flatten_keys(first_item) if first_item else {}
             out["fields_guess"] = guess_fields(first_item) if first_item else {}
             hits = [src.parse(it, i) for i, it in enumerate(items[:6]) if isinstance(it, dict)]
+            hits = [h for h in map(clean_hit, hits) if h is not None]
             out.update(ok=True, count=len(items), sample=[h.to_dict() for h in hits])
-        except (SourceError, FetchUnavailable, ValueError) as e:
+        except (SourceError, FetchUnavailable, ValueError, BlockedRequest, ResponseTooLarge) as e:
             out["error"] = str(e)
         except httpx.HTTPError as e:
             out["error"] = f"сеть: {type(e).__name__}"
@@ -467,10 +621,14 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
         return JSONResponse({"ok": True})
 
     async def index(request: Request):
-        return FileResponse(STATIC / "index.html")
+        return page_html("admin")
+
+    async def source_zip(request: Request):
+        return source_response()
 
     routes = [
         Route("/", index),
+        Route("/source.zip", source_zip),
         Route("/api/search", api_search),
         Route("/api/search/stream", api_search_stream),
         Route("/api/sources", api_sources),
@@ -503,11 +661,18 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
         Route("/api/subs/{sid:int}/items", api_sub_items),
         Route("/api/subs/{sid:int}/seen", api_sub_seen, methods=["POST"]),
         Route("/api/notify/test", api_notify_test, methods=["POST"]),
-        Mount("/static", StaticFiles(directory=STATIC), name="static"),
+        Mount("/static", SafeStatic(directory=STATIC), name="static"),
     ]
 
     class RequestGuard(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
+            response = await self.check(request, call_next)
+            response.headers.update(SECURITY_HEADERS)
+            return response
+
+        async def check(self, request: Request, call_next):
+            if not from_this_machine(request):
+                return err("админский профиль открывается только с этого компьютера", 403)
             allowed = allowed_hosts(rt.cfg)
             host = request.headers.get("host")
             if hostname(host) not in allowed:
@@ -519,13 +684,19 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
                     if request.headers.get("x-modelseek") != "1":
                         return err("missing X-Modelseek header", 403)
                     origin = request.headers.get("origin")
-                    if origin and hostname(origin, with_scheme=True) not in allowed:
-                        return err(f"источник {origin} не разрешён", 403)
+                    if origin and not same_origin(origin, request):
+                        return err(f"источник {origin[:80]} не разрешён", 403)
             return await call_next(request)
 
-    app = Starlette(routes=routes, lifespan=lifespan, middleware=[Middleware(RequestGuard)])
+    app = Starlette(routes=routes, lifespan=lifespan, middleware=[Middleware(BodyLimit), Middleware(RequestGuard)])
     app.state.runtime = rt
+    app.state.profile = "admin"
     return app
 
 
-app = create_app()
+def __getattr__(name: str):
+    """`uvicorn app.main:app` still works (admin profile only); importing the module builds nothing."""
+    if name == "app":
+        globals()["app"] = create_app()
+        return globals()["app"]
+    raise AttributeError(name)

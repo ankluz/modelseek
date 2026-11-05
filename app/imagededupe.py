@@ -8,6 +8,9 @@ from typing import Any
 import httpx
 
 from .models import ModelHit
+from .netguard import MAX_IMAGE_BYTES, ResponseTooLarge, read_limited
+
+MAX_PIXELS = 40_000_000
 
 
 class ImageDeduper:
@@ -29,8 +32,12 @@ class ImageDeduper:
     def dhash(data: bytes) -> int:
         from PIL import Image
 
-        img = Image.open(io.BytesIO(data)).convert("L").resize((9, 8), Image.Resampling.LANCZOS)
-        px = list(img.getdata())
+        img = Image.open(io.BytesIO(data))
+        if img.width * img.height > MAX_PIXELS:
+            raise ValueError("image too large")
+        img.draft("L", (64, 64))
+        img = img.convert("L").resize((9, 8), Image.Resampling.LANCZOS)
+        px = img.tobytes()  # mode L: one byte per pixel, row by row
         bits = 0
         for row in range(8):
             for col in range(8):
@@ -42,10 +49,13 @@ class ImageDeduper:
             return self._cache[url]
         h: int | None = None
         try:
-            if not url.startswith("data:"):
-                r = await self.client.get(url, timeout=8)
-                if r.status_code == 200 and len(r.content) < 5_000_000:
-                    h = await asyncio.to_thread(self.dhash, r.content)
+            if url.startswith(("http://", "https://")):
+                async with self.client.stream("GET", url, timeout=8) as r:
+                    if r.status_code == 200:
+                        data = await read_limited(r.aiter_bytes(), r.headers.get("content-length"), MAX_IMAGE_BYTES)
+                        h = await asyncio.to_thread(self.dhash, data)
+        except (ResponseTooLarge, httpx.HTTPError, OSError, ValueError, SyntaxError, MemoryError):
+            h = None
         except Exception:
             h = None
         self._cache[url] = h

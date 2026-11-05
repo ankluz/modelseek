@@ -37,7 +37,24 @@ DEFAULTS: dict[str, Any] = {
     "sources": {},
     "custom_sources": {},
     "links": {},
+    "public": {
+        "enabled": False,
+        "host": "0.0.0.0",
+        "port": 8090,
+        "auth": "none",
+        "allow_from": [],
+        "password_env": "MODELSEEK_PUBLIC_PASSWORD",
+        "searches_per_minute": 20,
+        "max_parallel_searches": 4,
+        "sources": [],
+        "allowed_hosts": [],
+        "trusted_proxies": [],
+        "source_url": "",
+        "lend_keys": False,
+    },
 }
+
+PUBLIC_AUTH = ("none", "password", "subnet")
 
 EDITABLE = ("server", "breaker", "browser", "impersonate", "ranking", "semantic", "translate", "filters",
             "subscriptions", "notify", "sources", "custom_sources", "links")
@@ -290,7 +307,47 @@ def validate(cfg: dict[str, Any]) -> None:
             raise ValueError(f"links.{name}.url: адрес должен содержать {{q}} — туда подставится запрос")
         if not str(sc.get("url", "")).startswith(("http://", "https://")):
             raise ValueError(f"links.{name}.url: нужен адрес http(s)://")
-    for section, key in (("translate", "api_key_env"), ("notify", "token_env")):
+    for section, key in (("translate", "api_key_env"), ("notify", "token_env"), ("public", "password_env")):
         name = (cfg.get(section) or {}).get(key)
         if name and not ENV_NAME.match(str(name)):
             raise ValueError(f"{section}.{key}: имя переменной ЗАГЛАВНЫМИ_БУКВАМИ")
+    validate_public(cfg.get("public") or {})
+
+
+def as_list(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("ожидался список")
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+def validate_public(pub: dict[str, Any]) -> None:
+    """The public profile is configured in config.yaml only; a mistake there must stop the start."""
+    import ipaddress
+
+    if pub.get("auth", "none") not in PUBLIC_AUTH:
+        raise ValueError("public.auth: одно из " + ", ".join(PUBLIC_AUTH))
+    for key in ("port", "searches_per_minute", "max_parallel_searches"):
+        try:
+            v = int(pub.get(key, DEFAULTS["public"][key]))
+        except (TypeError, ValueError):
+            raise ValueError(f"public.{key}: нужно целое число") from None
+        lo, hi = (1, 65535) if key == "port" else (1, 10000)
+        if not lo <= v <= hi:
+            raise ValueError(f"public.{key}: допустимо от {lo} до {hi}")
+    for key in ("allow_from", "trusted_proxies"):
+        for net in as_list(pub.get(key)):
+            try:
+                ipaddress.ip_network(net, strict=False)
+            except ValueError:
+                raise ValueError(f"public.{key}: «{net}» — не адрес и не подсеть (пример: 192.168.1.0/24)") from None
+    if pub.get("enabled") and pub.get("auth") == "subnet" and not as_list(pub.get("allow_from")):
+        raise ValueError("public.auth: subnet — перечислите подсети в public.allow_from")
+    url = str(pub.get("source_url") or "")
+    if url and not url.startswith(("http://", "https://")):
+        raise ValueError("public.source_url: нужен адрес http(s)://")
+    if not isinstance(pub.get("lend_keys", False), bool):
+        raise ValueError("public.lend_keys: true или false")

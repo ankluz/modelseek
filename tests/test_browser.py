@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from app.fetchers import BrowserFetcher, BrowserManager
+from app.netguard import NetGuard
 from app.sources.base import ChallengeError, Source
 
 from .fixtures import CHALLENGE_HTML
@@ -54,7 +55,7 @@ def site():
 
 
 def test_browser_fetch_uses_site_cookies(site, tmp_path):
-    mgr = BrowserManager(tmp_path / "profile", headless=True)
+    mgr = BrowserManager(tmp_path / "profile", headless=True, guard=NetGuard([site]))
 
     async def go():
         f = BrowserFetcher(mgr, site)
@@ -79,3 +80,64 @@ def test_browser_fetch_uses_site_cookies(site, tmp_path):
     with pytest.raises(ChallengeError):
         Source.check(r3)
     assert (tmp_path / "browser-user-agent.txt").exists()
+
+
+def serve(handler):
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def test_hostile_page_cannot_reach_local_network(tmp_path):
+    seen = []
+
+    class Internal(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            seen.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"secret")
+
+    inner, inner_url = serve(Internal)
+
+    class Evil(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path.startswith("/api"):
+                body, kind = b'{"ok": true}', "application/json"
+            else:
+                body = (f"<script>fetch('{inner_url}/fetch',{{mode:'no-cors'}}).catch(()=>{{}});"
+                        f"new Image().src='{inner_url}/img';"
+                        f"try{{new WebSocket('{inner_url.replace('http', 'ws')}/ws')}}catch(e){{}}</script>").encode()
+                kind = "text/html"
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.end_headers()
+            self.wfile.write(body)
+
+    evil, evil_url = serve(Evil)
+    mgr = BrowserManager(tmp_path / "profile", headless=True, guard=NetGuard([evil_url]))
+
+    async def go():
+        try:
+            r = await BrowserFetcher(mgr, evil_url).get(f"{evil_url}/api/x")
+            await asyncio.sleep(1.5)
+            return r
+        finally:
+            await mgr.aclose()
+
+    try:
+        r = asyncio.run(go())
+    except Exception as e:
+        pytest.skip(f"browser unavailable: {e}")
+    finally:
+        inner.shutdown()
+        evil.shutdown()
+    assert r.json() == {"ok": True}
+    assert seen == []
+    assert any(inner_url in u or inner_url.replace("http", "ws") in u for u in mgr.blocked)

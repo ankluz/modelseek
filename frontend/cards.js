@@ -1,4 +1,4 @@
-import { $, SIGNALS, ago, api, el, fmt, srcInfo, state, toast } from "./util.js";
+import { $, SIGNALS, ago, api, el, fmt, markSeenKey, srcInfo, state, toast } from "./util.js";
 import { openFavPopover } from "./favorites.js";
 import { openSimilarPopover } from "./imagesearch.js";
 
@@ -98,9 +98,7 @@ function shortLicense(l) {
 
 function markSeen(h, node) {
   node.classList.add("seen");
-  fetch("/api/seen", { method: "POST", keepalive: true,
-    headers: { "Content-Type": "application/json", "X-Modelseek": "1" }, body: JSON.stringify({ key: h.key }) })
-    .catch(() => {});
+  markSeenKey(h.key);
 }
 
 function setupFavExtra(h, node) {

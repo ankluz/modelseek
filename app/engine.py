@@ -10,9 +10,10 @@ from typing import Any
 import httpx
 
 from .fetchers import (BrowserFetcher, BrowserManager, Fetcher, FetchUnavailable, HttpFetcher,
-                       ImpersonateFetcher, origin_of)
-from .models import ModelHit
-from .sources import ChallengeError, Source, SourceError
+                       ImpersonateFetcher, Planned, PlanFetcher, PlannedRequest, ReplayFetcher, origin_of)
+from .models import ModelHit, clean_hit
+from .netguard import BlockedRequest, NetGuard, ResponseTooLarge, endpoint
+from .sources import GUEST, ChallengeError, CustomSource, GuestAccess, Source, SourceError
 
 
 class TTLCache:
@@ -75,8 +76,10 @@ class Breaker:
 
 
 class Engine:
-    def __init__(self, sources: dict[str, Source], client: httpx.AsyncClient, cfg: dict[str, Any]):
+    def __init__(self, sources: dict[str, Source], client: httpx.AsyncClient, cfg: dict[str, Any],
+                 guard: NetGuard | None = None):
         self.sources = sources
+        self.guard = guard or NetGuard()
         self.client = client
         self.cfg = cfg
         server = cfg["server"]
@@ -84,7 +87,7 @@ class Engine:
         self.limit = int(server["per_source_limit"])
         self.cache = TTLCache(float(server["cache_ttl_seconds"]))
         self.breaker = Breaker(int(cfg["breaker"]["max_failures"]), float(cfg["breaker"]["cooldown_minutes"]))
-        self._http = HttpFetcher(client)
+        self._http = HttpFetcher(client, guard=self.guard)
         self._imp: ImpersonateFetcher | None = None
         bcfg = cfg["browser"]
         self.browser = BrowserManager(
@@ -92,72 +95,145 @@ class Engine:
             headless=bool(bcfg.get("headless", True)),
             executable_path=bcfg.get("executable_path") or None,
             nav_timeout=float(bcfg.get("nav_timeout_seconds", 25)),
+            guard=self.guard,
         )
 
     def fetcher_for(self, src: Source) -> Fetcher:
         if src.mode == "impersonate":
             if self._imp is None:
-                self._imp = ImpersonateFetcher(self.timeout, self.cfg["impersonate"].get("target", "chrome"))
+                self._imp = ImpersonateFetcher(self.timeout, self.cfg["impersonate"].get("target", "chrome"),
+                                               guard=self.guard)
             return self._imp
         if src.mode == "browser":
             return BrowserFetcher(self.browser, origin_of(src.homepage))
         return self._http
 
+    async def safe_hits(self, found: list[ModelHit], src: Source | None = None) -> tuple[list[ModelHit], int]:
+        """Clean hits and drop links into the local network; thumbnails pointing there are removed.
+
+        Only a user's own source may point into the local network, and only at its own host and port.
+        """
+        hits = [c for h in found if (c := clean_hit(h)) is not None]
+        own = endpoint(str(src.cfg.get("url") or "")) if isinstance(src, CustomSource) else None
+        hosts: dict[tuple, bool] = {}
+
+        async def ok(url: str) -> bool:
+            ep = endpoint(url)
+            if ep is None:
+                return False
+            if ep not in hosts:
+                hosts[ep] = (await self.guard.allowed(url, use_trust=False)
+                             or (own is not None and ep[1:] == own[1:]))
+            return hosts[ep]
+
+        out, dropped = [], len(found) - len(hits)
+        for h in hits:
+            if not await ok(h.url):
+                dropped += 1
+                continue
+            if h.thumbnail and not h.thumbnail.startswith("data:") and not await ok(h.thumbnail):
+                h.thumbnail = None
+            out.append(h)
+        return out, dropped
+
     def timeout_for(self, src: Source) -> float:
         return self.timeout * 4 if src.mode == "browser" else self.timeout
 
-    async def _one(self, src: Source, query: str, page: int,
-                   order: str | None = None) -> tuple[list[ModelHit], dict[str, Any]]:
+    async def _one(self, src: Source, query: str, page: int, order: str | None = None,
+                   guest: GuestAccess | None = None) -> tuple[list[ModelHit], dict[str, Any]]:
+        """guest: runs with the visitor's keys. Their failures never pause a source for the owner, and an
+        answer their browser fetched itself is used for them only and never cached."""
+        if guest is not None:
+            GUEST.set(guest)  # this task's own context: the keys reach Source.secret and nothing else
         st: dict[str, Any] = {"name": src.name, "label": src.label, "mode": src.mode,
                               "status": "ok", "count": 0, "ms": 0, "link": src.search_link(query)}
         if src.mode == "link":
             st["status"] = "link"
             return [], st
         if not src.configured:
-            st.update(status="skipped", error="нет ключа: " + ", ".join(src.missing_secrets))
+            hint = ("добавьте свой ключ в настройках" if guest is not None
+                    else "нет ключа: " + ", ".join(src.missing_secrets))
+            st.update(status="skipped", error=hint)
             return [], st
         until = self.breaker.is_open(src.name)
         if until:
             st.update(status="paused", error=f"отключён до {until:%H:%M} после нескольких ошибок подряд")
             return [], st
         native = src.native_sort(order)
+        fetched = guest.fetched.get(src.name) if guest is not None else None
         key = (src.name, query.lower().strip(), page, native)
-        cached = self.cache.get(key)
-        if cached is not None:
-            st.update(count=len(cached), cached=True)
-            return [h.copy() for h in cached], st
+        if fetched is None:
+            cached = self.cache.get(key)
+            if cached is not None:
+                st.update(count=len(cached), cached=True)
+                return [h.copy() for h in cached], st
+
+        def fail():
+            if guest is None:
+                self.breaker.fail(src.name)
 
         t0 = time.perf_counter()
         hits: list[ModelHit] = []
         try:
-            fetcher = self.fetcher_for(src)
+            if fetched is not None:
+                fetcher: Fetcher = ReplayFetcher(*fetched)
+                st["via"] = "browser"
+            else:
+                fetcher = self.fetcher_for(src)
             kwargs = {"sort": native} if native else {}
             found = await asyncio.wait_for(src.search(fetcher, query, self.limit, page, **kwargs), self.timeout_for(src))
-            hits = [h for h in found if h.url.startswith(("http://", "https://"))]
-            self.cache.set(key, [h.copy() for h in hits])
-            self.breaker.ok(src.name)
+            hits, dropped = await self.safe_hits(found, src)
+            if fetched is None:
+                self.cache.set(key, [h.copy() for h in hits])
+            if guest is None:
+                self.breaker.ok(src.name)
             st["count"] = len(hits)
+            if dropped:
+                st["dropped"] = dropped
         except ChallengeError as e:
-            st.update(status="challenge", error=str(e), can_open=src.mode == "browser")
-            self.breaker.fail(src.name)
+            st.update(status="challenge", error=str(e), can_open=src.mode == "browser" and guest is None)
+            fail()
         except FetchUnavailable as e:
             st.update(status="error", error=str(e))
         except asyncio.TimeoutError:
             st.update(status="error", error=f"таймаут {self.timeout_for(src):.0f} с")
-            self.breaker.fail(src.name)
-        except SourceError as e:
-            st.update(status="error", error=str(e))
-            self.breaker.fail(src.name)
+            fail()
+        except (SourceError, BlockedRequest, ResponseTooLarge) as e:
+            st.update(status="error", error=str(e)[:200])
+            fail()
         except httpx.HTTPError as e:
             st.update(status="error", error=f"сеть: {type(e).__name__}")
-            self.breaker.fail(src.name)
+            fail()
         except Exception as e:
             st.update(status="error", error=f"{type(e).__name__}: {e}"[:180])
-            self.breaker.fail(src.name)
+            fail()
         st["ms"] = round((time.perf_counter() - t0) * 1000)
         return hits, st
 
-    async def stream(self, query: str, names: list[str], page: int = 1, order: str | None = None
+    async def plan(self, src: Source, query: str, page: int, order: str | None,
+                   guest: GuestAccess) -> PlannedRequest | None:
+        """The request a guest's browser may send itself: only to a site that allows it (CORS), in plain
+        http mode, and only with the guest's own keys, never the owner's."""
+        if not src.browser_direct or src.mode != "http" or not src.enabled:
+            return None
+        token = GUEST.set(guest)
+        try:
+            if not src.guest_keyed():
+                return None
+            native = src.native_sort(order)
+            kwargs = {"sort": native} if native else {}
+            try:
+                await src.search(PlanFetcher(), query, self.limit, page, **kwargs)
+            except Planned as p:
+                return p.request
+            except Exception:
+                return None
+            return None
+        finally:
+            GUEST.reset(token)
+
+    async def stream(self, query: str, names: list[str], page: int = 1, order: str | None = None,
+                     guest: GuestAccess | None = None
                      ) -> AsyncIterator[tuple[list[ModelHit], list[dict[str, Any]], bool]]:
         chosen = [self.sources[n] for n in names if n in self.sources]
         statuses: dict[str, dict[str, Any]] = {
@@ -165,7 +241,7 @@ class Engine:
                      "link": s.search_link(query)} for s in chosen
         }
         hits: list[ModelHit] = []
-        tasks = {asyncio.ensure_future(self._one(s, query, page, order)): s.name for s in chosen}
+        tasks = {asyncio.ensure_future(self._one(s, query, page, order, guest)): s.name for s in chosen}
         if not tasks:
             yield [], [], True
             return

@@ -5,7 +5,7 @@ services:
     build:
       context: .
       args:
-        EXTRAS: ${MODELSEEK_EXTRAS:-0}
+        EXTRAS: ${MODELSEEK_EXTRAS:-1}
     image: modelseek:latest
     container_name: modelseek
     restart: unless-stopped
@@ -17,7 +17,11 @@ services:
       MODELSEEK__SOURCES__SEARXNG__URL: http://searxng:8080
       MODELSEEK__NOTIFY__OPEN_URL: ${MODELSEEK_PUBLIC_URL:-http://127.0.0.1:8088}
     ports:
-      - "${MODELSEEK_BIND:-127.0.0.1}:${MODELSEEK_PORT:-8088}:8000"
+      # Admin profile: this computer only. Do not change 127.0.0.1 here.
+      - "127.0.0.1:${MODELSEEK_PORT:-8088}:8000"
+      # Public profile (public.enabled in config.yaml). Closed to the network by default:
+      # set MODELSEEK_PUBLIC_BIND=0.0.0.0 in .env to let other devices in.
+      - "${MODELSEEK_PUBLIC_BIND:-127.0.0.1}:${MODELSEEK_PUBLIC_PORT:-8090}:8001"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - modelseek-data:/app/data

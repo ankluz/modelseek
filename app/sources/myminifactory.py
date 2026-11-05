@@ -14,6 +14,7 @@ class MyMiniFactory(Source):
     color = "#f4b400"
     official_api = True
     secret_keys = ("key_env",)
+    browser_direct = True  # its API answers pages on other sites (CORS)
     allowed_modes = ("http", "impersonate", "link")
 
     async def search(self, fetcher, query, limit, page):

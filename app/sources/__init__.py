@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import ChallengeError, LinkSource, Source, SourceError
+from .base import GUEST, ChallengeError, GuestAccess, LinkSource, Source, SourceError
 from .cults3d import Cults3D
 from .custom import CustomSource
 from .makerworld import MakerWorld
@@ -35,4 +35,4 @@ def build_sources(cfg: dict[str, Any]) -> dict[str, Source]:
     return out
 
 
-__all__ = ["REGISTRY", "ChallengeError", "CustomSource", "LinkSource", "Source", "SourceError", "build_sources"]
+__all__ = ["GUEST", "REGISTRY", "ChallengeError", "CustomSource", "GuestAccess", "LinkSource", "Source", "SourceError", "build_sources"]

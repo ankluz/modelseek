@@ -1,4 +1,5 @@
-import { $, SIGNALS, api, debounce, el, state, toast } from "./util.js";
+import { $, GUEST, SIGNALS, api, debounce, el, state, toast } from "./util.js";
+import { addHistory, personalize } from "./guest.js";
 import { reconcile, renderCard } from "./cards.js";
 import { save, toggleWord } from "./settings.js";
 import { refreshSubsBadge } from "./subs.js";
@@ -38,7 +39,7 @@ export function renderChips() {
     let tail = null;
     if (!src.configured) {
       b.classList.add("disabled");
-      b.title = "Нужен ключ в .env: " + src.missing.join(", ");
+      b.title = GUEST ? "Нужен ваш ключ этого сайта: Настройки → Ключи сайтов" : "Нужен ключ в .env: " + src.missing.join(", ");
       tail = el("span", { class: "st" }, "нет ключа");
     } else if (st && on) {
       const map = {
@@ -51,11 +52,12 @@ export function renderChips() {
       };
       tail = (map[st.status] || (() => null))();
       if (st.error) b.title = st.error;
+      else if (st.via === "browser") b.title = "Ваш браузер спросил сайт сам";
     }
     if (src.mode === "browser" || src.mode === "impersonate") b.append(el("span", { class: "mode", title: "режим " + src.mode }, src.mode === "browser" ? "🌐" : "🎭"));
     if (tail) b.append(tail);
     b.addEventListener("click", () => {
-      if (!src.configured) return;
+      if (!src.configured) { if (GUEST) location.hash = "#settings/look"; return; }
       const set = new Set(s.enabled);
       set.has(src.name) ? set.delete(src.name) : set.add(src.name);
       s.enabled = [...set];
@@ -63,7 +65,9 @@ export function renderChips() {
       renderChips();
     });
     const wrap = [b];
-    if (st && on && st.status === "challenge" && st.can_open) {
+    if (GUEST) {
+      // the browser check and the breaker reset belong to the owner
+    } else if (st && on && st.status === "challenge" && st.can_open) {
       wrap.push(el("button", { type: "button", class: "btn small warn", onclick: () => openBrowser(src) }, "Пройти проверку"));
     } else if (st && on && st.status === "paused") {
       wrap.push(el("button", { type: "button", class: "btn small ghost", title: "Попробовать снова сейчас",
@@ -102,7 +106,30 @@ async function openBrowser(src) {
 export function rerun() { if (cur.query) search(cur.query, 1); }
 export const rerunSoon = debounce(rerun, 250);
 
-export function search(query, page = 1) {
+// A site that allows it (CORS) is asked by the guest's own browser, with their key and from their address;
+// the server only parses and ranks the answer. If the site refuses or is silent, the server asks it instead.
+async function fetchInBrowser(params) {
+  if (!GUEST || !state.sources.some((x) => x.browser_direct && x.own_keys?.length)) return null;
+  let plan;
+  try { plan = await api("/api/search/plan", { query: params.toString() }); } catch { return null; }
+  if (!plan?.token) return null;
+  await Promise.all(plan.requests.map(async (r) => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const resp = await fetch(r.url, { method: r.method, headers: r.headers, body: r.body ?? undefined, mode: "cors",
+        credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store", signal: ctl.signal });
+      const text = await resp.text();
+      if (text.length <= 2_000_000) {
+        await api("/api/search/relay", { method: "POST", body: { token: plan.token, source: r.source, status: resp.status, text } });
+      }
+    } catch { /* refused by the site (CORS) or no answer: the server will ask */ }
+    finally { clearTimeout(timer); }
+  }));
+  return plan.token;
+}
+
+export async function search(query, page = 1) {
   query = (query || "").trim();
   if (!query) return;
   if (cur.es) cur.es.close();
@@ -123,11 +150,19 @@ export function search(query, page = 1) {
     history.replaceState(null, "", "?q=" + encodeURIComponent(query) + "#search");
   }
 
-  const es = new EventSource("/api/search/stream?" + searchParams(page, query));
+  const params = searchParams(page, query);
+  const relayed = await fetchInBrowser(params);
+  if (id !== cur.reqId) return;
+  if (relayed) params.set("pf", relayed);
+  const es = new EventSource("/api/search/stream?" + params);
   cur.es = es;
   es.addEventListener("update", (ev) => {
     if (id !== cur.reqId) return;
     const snap = JSON.parse(ev.data);
+    if (GUEST) {
+      snap.results = personalize(snap.results, state.settings.filters);
+      if (snap.done && page === 1) addHistory(query, snap.results.length);
+    }
     cur.statuses = Object.fromEntries(snap.sources.map((s) => [s.name, s]));
     cur.pages[page - 1] = snap.results;
     cur.lastSnapshot = snap;
@@ -135,9 +170,22 @@ export function search(query, page = 1) {
     render(snap);
   });
   es.addEventListener("end", () => { es.close(); if (id === cur.reqId) finish(); });
-  es.onerror = () => {
+  es.addEventListener("fail", (ev) => {
     es.close();
     if (id !== cur.reqId) return;
+    let msg = "поиск не выполнен";
+    try { msg = JSON.parse(ev.data).error || msg; } catch {}
+    $("#summary").textContent = msg[0].toUpperCase() + msg.slice(1);
+    if (page === 1 && !cur.lastSnapshot) $("#results").replaceChildren();
+    finish();
+  });
+  es.onerror = async () => {
+    es.close();
+    if (id !== cur.reqId) return;
+    if (GUEST) {
+      const s = await api("/api/session").catch(() => null);
+      if (s && !s.logged_in) { document.dispatchEvent(new CustomEvent("need-login")); $("#summary").textContent = "Нужен пароль"; finish(); return; }
+    }
     if (!cur.lastSnapshot) $("#summary").textContent = "Сервер не отвечает — запущен ли modelseek?";
     finish();
   };

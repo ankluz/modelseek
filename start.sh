@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PORT="${MODELSEEK_PORT:-8088}"
-HOST="${MODELSEEK_HOST:-127.0.0.1}"
+export MODELSEEK_PORT="$PORT"
 
 PY=""
 for c in python3.13 python3.12 python3.11 python3.10 python3 python; do
@@ -42,4 +42,4 @@ echo "[modelseek] ${URL}   (Ctrl+C — остановить)"
 if [ "${MODELSEEK_NO_BROWSER:-0}" != "1" ] && command -v xdg-open >/dev/null 2>&1; then
   (sleep 3 && xdg-open "$URL" >/dev/null 2>&1 || true) &
 fi
-exec .venv/bin/python -m uvicorn app.main:app --host "$HOST" --port "$PORT"
+exec .venv/bin/python -m app.serve

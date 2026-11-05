@@ -1,4 +1,4 @@
-import { $, $$, FILTER_KEYS, SIGNALS, api, el, state, store, toast, words } from "./util.js";
+import { $, $$, FILTER_KEYS, GUEST, SIGNALS, api, el, state, store, toast, words } from "./util.js";
 
 let onChange = () => {};
 export const setOnChange = (fn) => { onChange = fn; };
@@ -160,7 +160,8 @@ export function syncForm() {
       disabled = true;
       hint = feat.semantic.error || "Выключено: semantic.enabled в config.yaml";
     }
-    if (k === "personal" && !state.favorites.size) hint = "Заработает, когда в избранном что-то появится";
+    if (k === "personal" && GUEST) { disabled = true; hint = "Только у владельца: сервер не знает вашего избранного"; }
+    else if (k === "personal" && !state.favorites.size) hint = "Заработает, когда в избранном что-то появится";
     return slider({ id: "w-" + k, label, value: s.weights[k] ?? 0, min: 0, max: 1, step: 0.05, disabled, hint,
       onInput: (v) => { s.weights[k] = v; save(); } });
   }));

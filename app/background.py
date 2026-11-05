@@ -1,7 +1,6 @@
 """Запуск без консоли: pythonw не даёт stdout и stderr, поэтому пишем их в файл."""
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -25,10 +24,9 @@ def main() -> None:
         data_dir = "data"
     sys.stdout = sys.stderr = open_log(data_dir)
 
-    import uvicorn
+    from .serve import main as serve
 
-    uvicorn.run("app.main:app", host=os.environ.get("MODELSEEK_HOST") or "127.0.0.1",
-                port=int(os.environ.get("MODELSEEK_PORT") or 8088), access_log=False)
+    serve()
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do if not "%%B"=="" 
 
 echo [modelseek] http://127.0.0.1:%MODELSEEK_PORT%   (Ctrl+C to stop)
 if not "%MODELSEEK_NO_BROWSER%"=="1" start "" cmd /c "timeout /t 3 >nul & start http://127.0.0.1:%MODELSEEK_PORT%"
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port %MODELSEEK_PORT%
+".venv\Scripts\python.exe" -m app.serve
 goto :eof
 
 :nopython

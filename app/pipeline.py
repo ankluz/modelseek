@@ -7,9 +7,11 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .engine import Engine
+from .fetchers import PlannedRequest
 from .imagededupe import ImageDeduper
 from .ranking import SIGNALS, Profile, apply_filters, facets, matches_query, normalize_filters, rank, sort_hits
 from .semantic import Embedder
+from .sources import GuestAccess
 from .storage import Storage
 from .translate import Translator
 
@@ -98,15 +100,37 @@ class Pipeline:
             return [n for n in sp.sources if n in srcs]
         return [n for n, s in srcs.items() if s.enabled]
 
-    async def run(self, sp: SearchParams, record_history: bool = True) -> AsyncIterator[dict[str, Any]]:
+    async def site_query(self, sp: SearchParams) -> tuple[str, str | None]:
+        translated = await self.translator.to_english(sp.query)
+        return translated or sp.query, translated
+
+    async def browser_plan(self, sp: SearchParams, guest: GuestAccess) -> dict[str, PlannedRequest]:
+        """Requests a guest's browser may send itself for this search."""
+        site_query, _ = await self.site_query(sp)
+        out = {}
+        for name in self._names(sp):
+            req = await self.engine.plan(self.engine.sources[name], site_query, sp.page, sp.site_order, guest)
+            if req is not None:
+                out[name] = req
+        return out
+
+    async def run(self, sp: SearchParams, record_history: bool = True,
+                  guest: bool | GuestAccess = False) -> AsyncIterator[dict[str, Any]]:
+        """guest: a visitor of the public profile; the owner's history, favorites and hidden list stay out.
+        A GuestAccess also carries the visitor's keys and what their browser fetched; plain True is a
+        guest who may use the owner's keys."""
         t0 = time.perf_counter()
         r = self.cfg["ranking"]
-        translated = await self.translator.to_english(sp.query)
-        site_query = translated or sp.query
-        hidden = self.storage.hidden_keys()
-        seen = self.storage.seen_keys()
-        favs = self.storage.favorite_keys()
-        profile = Profile.from_hits(self.storage.favorite_hits()) if sp.weights.get("personal", 0) > 0 else None
+        site_query, translated = await self.site_query(sp)
+        access = guest if isinstance(guest, GuestAccess) else (GuestAccess(lend=True) if guest else None)
+        if guest:
+            record_history = False
+            hidden, seen, favs, profile = set(), set(), {}, None
+        else:
+            hidden = self.storage.hidden_keys()
+            seen = self.storage.seen_keys()
+            favs = self.storage.favorite_keys()
+            profile = Profile.from_hits(self.storage.favorite_hits()) if sp.weights.get("personal", 0) > 0 else None
         source_weights = {n: s.weight for n, s in self.engine.sources.items()} | sp.source_weights
         sem_cache: dict[str, float] = {}
         names = self._names(sp)
@@ -114,7 +138,7 @@ class Pipeline:
         unranked = {n for n in names if self.engine.sources[n].native_sort(order)}
         alt_query = sp.query if translated else None
 
-        async for hits, statuses, done in self.engine.stream(site_query, names, sp.page, order):
+        async for hits, statuses, done in self.engine.stream(site_query, names, sp.page, order, access):
             on_topic = [h for h in hits if h.source not in unranked or matches_query(site_query, h, alt_query)]
             filtered = apply_filters(on_topic, sp.filters, hidden, seen)
             todo = [h for h in filtered if h.key not in sem_cache]
@@ -151,8 +175,9 @@ class Pipeline:
                 "results": results,
             }
 
-    async def final(self, sp: SearchParams, record_history: bool = True) -> dict[str, Any]:
+    async def final(self, sp: SearchParams, record_history: bool = True,
+                    guest: bool | GuestAccess = False) -> dict[str, Any]:
         last: dict[str, Any] = {}
-        async for snap in self.run(sp, record_history):
+        async for snap in self.run(sp, record_history, guest):
             last = snap
         return last

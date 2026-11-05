@@ -11,6 +11,7 @@ from .config import Settings
 from .engine import Engine
 from .imagededupe import ImageDeduper
 from .installer import Jobs
+from .netguard import MAX_REDIRECTS, NetGuard, Resolver, no_resolver, trusted_urls
 from .pipeline import Pipeline
 from .scheduler import Notifier, Scheduler
 from .semantic import Embedder
@@ -23,9 +24,10 @@ log = logging.getLogger("modelseek.runtime")
 
 class Runtime:
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None,
-                 db_path: str | Path | None = None, start_scheduler: bool = True):
+                 db_path: str | Path | None = None, start_scheduler: bool = True, resolver: Resolver | None = None):
         self.settings = settings
         self.transport = transport
+        self.resolver = resolver if resolver is not None else (no_resolver if transport is not None else None)
         self.db_path = db_path
         self.start_scheduler = start_scheduler
         self.jobs = Jobs()
@@ -48,16 +50,19 @@ class Runtime:
 
     def _build(self, prev_embedder: Embedder | None = None):
         cfg = self.settings.effective()
+        self.guard = NetGuard(trusted_urls(cfg), self.resolver)
         client = httpx.AsyncClient(
             transport=self.transport,
             timeout=httpx.Timeout(float(cfg["server"]["request_timeout_seconds"])),
             headers={"User-Agent": cfg["server"]["user_agent"], "Accept-Language": "en"},
             follow_redirects=True,
+            max_redirects=MAX_REDIRECTS,
+            event_hooks={"request": [self.guard.httpx_hook]},
         )
         self.cfg = cfg
         self.client = client
         self.sources = build_sources(cfg)
-        self.engine = Engine(self.sources, client, cfg)
+        self.engine = Engine(self.sources, client, cfg, guard=self.guard)
         if (prev_embedder is not None and prev_embedder.available
                 and prev_embedder.enabled == bool(cfg["semantic"].get("enabled"))
                 and prev_embedder.model_name == cfg["semantic"].get("model")):
@@ -68,6 +73,14 @@ class Runtime:
         self.deduper = ImageDeduper(client, bool(cfg["ranking"].get("dedupe_images")))
         self.notifier = Notifier(cfg["notify"], client)
         self.version += 1
+
+    def features(self) -> dict[str, Any]:
+        return {
+            "semantic": self.embedder.status(),
+            "translate": self.translator.status(),
+            "image_dedupe": self.deduper.status(),
+            "notify": {"kind": self.notifier.kind, "enabled": self.notifier.enabled},
+        }
 
     def _wire(self):
         self.pipeline = Pipeline(self.cfg, self.engine, self.storage, self.embedder, self.translator, self.deduper)

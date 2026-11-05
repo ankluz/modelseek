@@ -1,4 +1,5 @@
-import { $, $$, api, el, toast } from "./util.js";
+import { $, $$, GUEST, GUEST_KEYS, GUEST_SETTINGS, GUEST_UI, api, cookie, el, state, toast, uiStore } from "./util.js";
+import { forgetAll } from "./guest.js";
 
 let S = null;
 let extras = null;
@@ -16,9 +17,8 @@ export const THEMES = [
   { id: "tokyo", name: "Tokyo Night", note: "тёмная", sw: ["#1a1b26", "#1f2335", "#7aa2f7", "#c0caf5"] },
   { id: "solarized", name: "Solarized Light", note: "светлая", sw: ["#fdf6e3", "#fffbf0", "#cb4b16", "#45575e"] },
 ];
-const UI_KEY = "modelseek.ui";
-export function ui() { try { return JSON.parse(localStorage.getItem(UI_KEY) || "{}"); } catch { return {}; } }
-function saveUi(v) { try { localStorage.setItem(UI_KEY, JSON.stringify(v)); } catch {} }
+export function ui() { return uiStore.load(); }
+function saveUi(v) { uiStore.save(v); }
 export function applyUi() {
   const u = ui();
   let t = u.theme || "auto";
@@ -135,8 +135,10 @@ function sectionLook() {
   const dens = select(u.density || "normal", [["compact", "Компактные"], ["normal", "Обычные"], ["large", "Крупные"]]);
   dens.addEventListener("change", () => { saveUi({ ...ui(), density: dens.value }); applyUi(); toast("Размер карточек: " + dens.selectedOptions[0].text); });
   return [
-    panel("Тема", "Хранится в этом браузере.", el("div", { class: "theme-grid" }, ...cards)),
+    panel("Тема", GUEST ? "Хранится в куки этого браузера." : "Хранится в этом браузере.", el("div", { class: "theme-grid" }, ...cards)),
     panel("Карточки", null, field("Размер карточек в выдаче", dens)),
+    GUEST ? guestKeys() : null,
+    GUEST ? guestLook() : null,
   ];
 }
 
@@ -475,7 +477,7 @@ async function refreshExtras() { extras = await api("/api/extras").catch(() => e
 function sectionComponents() {
   const job = jobConsole();
   const boxes = {};
-  const rows = (extras?.items || []).map((i) => {
+  const rows = (extras?.items || []).filter((i) => !(extras.docker && i.key === "playwright")).map((i) => {
     const cb = el("input", { type: "checkbox", disabled: i.installed, checked: false });
     boxes[i.key] = cb;
     return el("label", { class: "comp-row" + (i.installed ? " done" : "") }, cb,
@@ -488,7 +490,8 @@ function sectionComponents() {
     if (await job.run(api("/api/extras/chromium", { method: "POST" })) === "ok") { await refreshExtras(); rerender(); }
   } }, "Скачать Chromium (~150 МБ)") : null;
   return [panel("Необязательные компоненты",
-    `Ставятся в окружение, из которого запущен modelseek (Python ${extras?.python || "?"}${extras?.venv ? ", .venv" : ""}${extras?.docker ? ", Docker: в том data" : ""}). После установки включаются без перезапуска.`,
+    extras?.docker ? `В Docker компоненты входят в образ (Python ${extras.python}). Режим browser в контейнере не работает, поэтому Playwright не нужен.`
+      : `Ставятся в окружение, из которого запущен modelseek (Python ${extras?.python || "?"}${extras?.venv ? ", .venv" : ""}). После установки включаются без перезапуска.`,
     el("div", { class: "comp-list" }, ...rows), job,
     saveRow("Установить выбранное", async () => {
       const keys = Object.entries(boxes).filter(([, cb]) => cb.checked).map(([k]) => k);
@@ -497,7 +500,9 @@ function sectionComponents() {
       await refreshExtras();
       if (st === "ok") { await onSaved(); rerender(); }
     }, chromium ? [chromium] : []),
-    el("p", { class: "muted small" }, "Если установка из интерфейса не проходит (нет прав, Docker), запустите install-extras.bat или соберите образ с EXTRAS=1."))];
+    el("p", { class: "muted small" }, extras?.docker
+      ? "Если компонентов нет, образ собран без них: выполните docker compose up -d --build."
+      : "Если установка из интерфейса не проходит (нет прав), запустите install-extras.bat или install-extras.sh."))];
 }
 
 function sectionNotify() {
@@ -524,6 +529,95 @@ function sectionNotify() {
       field("Ссылка в уведомлении ведёт на", openUrl, "Адрес modelseek, как его видно с телефона (например, по Tailscale)."),
       saveRow("Сохранить", async () => { await patch({ notify: { kind: kind.value, url: url.value.trim(), chat_id: chat.value.trim(), token_env: tokenEnv.value.trim(), open_url: openUrl.value.trim() } }); rerender(); }, [test])),
   ];
+}
+
+const AUTH_TEXT = { none: "без входа", password: "общий пароль", subnet: "только из перечисленных подсетей" };
+
+function publicPanel() {
+  const p = S.public || {};
+  const where = p.enabled ? `порт ${p.port}, адрес ${p.host}` : "выключен";
+  return panel("Внешний профиль",
+    "Отдельный порт для доступа с других устройств: только поиск, без вашего избранного, истории, подписок, ключей и настроек. " +
+    "Включается и настраивается в config.yaml (раздел public) — после правки перезапустите modelseek.",
+    el("ul", { class: "status-list" },
+      el("li", {}, "Состояние: ", pill(p.running, "работает", p.enabled ? "включён, ждёт перезапуска" : "выключен"), " ", where),
+      el("li", {}, "Вход: ", AUTH_TEXT[p.auth] || p.auth,
+        (p.allow_from || []).length ? ` · пускать только из ${p.allow_from.join(", ")}` : ""),
+      el("li", {}, "Поисков в минуту с одного адреса: ", String(p.searches_per_minute ?? "—")),
+      (p.sources || []).length ? el("li", {}, "Источники для гостей: ", p.sources.join(", ")) : null,
+      el("li", {}, "Ключи сайтов: ", p.lend_keys
+        ? "гости вводят свои; у кого своего нет — ищут с вашим (public.lend_keys: true)"
+        : "гости вводят свои, ваши им не достаются (включить: public.lend_keys: true)"),
+      p.docker ? el("li", {}, "Docker: другие устройства попадут сюда, если в .env задано ",
+        el("code", {}, "MODELSEEK_PUBLIC_BIND=0.0.0.0"), " (иначе порт открыт только на этом компьютере)") : null,
+      p.addresses_hidden ? el("li", { class: "warn" }, "Часть гостей пришла через шлюз Docker, и их адреса не видны " +
+        "(в Docker Desktop так со всеми): лимиты для них считаются по браузеру, а allow_from и вход subnet их не пропустят. " +
+        "Нужны настоящие адреса — запускайте modelseek без Docker.") : null),
+    p.password_env ? secretField(p.password_env, "Пароль для гостей",
+      p.auth === "password" ? "Смена пароля выводит всех гостей из профиля." : "Нужен, если в config.yaml задано public.auth: password.") : null);
+}
+
+// A guest searches with their own keys: they live in this browser's cookie and reach the server only with a search.
+function guestKeys() {
+  const srcs = (state.sources || []).filter((s) => (s.key_fields || []).length);
+  if (!srcs.length) return null;
+  const mine = cookie.get(GUEST_KEYS) || {};
+  const inputs = {};
+  const rows = srcs.map((s) => {
+    inputs[s.name] = {};
+    const fields = s.key_fields.map((k) => {
+      const i = el("input", { type: k === "user_env" ? "text" : "password", autocomplete: "off", spellcheck: "false" });
+      i.value = (mine[s.name] || {})[k] || "";
+      inputs[s.name][k] = i;
+      return field(KEY_LABEL[k] || k, i);
+    });
+    const [href, how] = KEY_HELP[s.name] || [];
+    const note = s.own_keys?.length
+      ? (s.browser_direct ? "Ваш ключ. Браузер спрашивает сайт сам, с вашего адреса; если сайт не ответит — через сервер."
+        : "Ваш ключ. Сайт не отвечает браузеру напрямую, поэтому запрос идёт через сервер.")
+      : s.owner_key ? "Пока без вашего ключа ищет с ключом владельца." : "Без ключа этот сайт пропускается.";
+    return el("div", { class: "guest-key" }, el("b", {}, s.label), " ", el("small", { class: "muted" }, note),
+      el("div", { class: "fields-grid" }, ...fields),
+      how ? el("small", { class: "muted" }, how, " ", el("a", { href, target: "_blank", rel: "noopener" }, "Получить ключ ↗")) : null);
+  });
+  const store = async (value, msg) => {
+    if (value === null) cookie.remove(GUEST_KEYS);
+    else if (!cookie.set(GUEST_KEYS, value)) { toast("Слишком длинные ключи"); return; }
+    await onSaved();
+    toast(msg);
+    rerender();
+  };
+  const saveBtn = el("button", { type: "button", class: "btn", onclick: () => {
+    const out = {};
+    for (const [name, fs] of Object.entries(inputs)) {
+      const v = Object.fromEntries(Object.entries(fs).map(([k, i]) => [k, i.value.trim()]).filter(([, x]) => x));
+      if (Object.keys(v).length) out[name] = v;
+    }
+    store(Object.keys(out).length ? out : null, "Ключи сохранены в этом браузере");
+  } }, "Сохранить ключи");
+  const clear = el("button", { type: "button", class: "btn ghost", onclick: () => store(null, "Ключи удалены") }, "Удалить ключи");
+  return panel("Ключи сайтов", "Некоторые сайты отдают модели только по ключу API. Ключ хранится в куки этого браузера " +
+    "и уходит на сервер только вместе с вашими поисками; сервер его не сохраняет.", ...rows,
+  el("div", { class: "save-row" }, clear, saveBtn));
+}
+
+function guestLook() {
+  const reset = el("button", { type: "button", class: "btn ghost danger", onclick: () => {
+    if (!confirm("Удалить из этого браузера настройки, ключи, избранное, историю и скрытые модели modelseek?")) return;
+    forgetAll();
+    cookie.remove(GUEST_SETTINGS);
+    cookie.remove(GUEST_UI);
+    cookie.remove(GUEST_KEYS);
+    location.reload();
+  } }, "Забыть мои данные");
+  const logout = state.config?.auth === "password" ? el("button", { type: "button", class: "btn ghost", onclick: async () => {
+    await api("/api/logout", { method: "POST" }).catch(() => null);
+    location.reload();
+  } }, "Выйти") : null;
+  return panel("Ваши данные", "Вы во внешнем профиле. Сервер не хранит ничего о вас: настройки поиска, тема и ключи лежат " +
+    "в куки этого браузера, избранное, история и скрытые модели — в его хранилище. В другом браузере их не будет. " +
+    "Ещё браузер получает случайный номер — по нему сервер считает лимит поисков.",
+  el("div", { class: "save-row" }, logout, reset));
 }
 
 function sectionServer() {
@@ -553,6 +647,7 @@ function sectionServer() {
       el("div", { class: "fields-grid" }, field("Загрузка страницы, с", i.nav), field("Отпечаток curl_cffi", i.target, "chrome, edge, safari…")),
       saveRow("Сохранить", () => patch({ browser: { headless: headless.input.checked, nav_timeout_seconds: Number(i.nav.value) },
         impersonate: { target: i.target.value.trim() || "chrome" } }))),
+    publicPanel(),
     panel("Файлы", "Интерфейс не переписывает config.yaml — изменения лежат отдельно и перекрывают его.",
       el("ul", { class: "status-list" },
         el("li", {}, "Ваш конфиг: ", el("code", {}, S.paths.config)),
@@ -574,10 +669,11 @@ function rerender() {
 }
 
 export async function showSettings(section) {
-  current = SECTIONS[section] ? section : "look";
+  current = SECTIONS[section] && !GUEST ? section : "look";
   if (current !== "custom") editing = null;
   $$(".settings-nav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#settings/" + current));
   const body = $("#settings-body");
+  if (GUEST) { rerender(); return; }
   if (!S) body.replaceChildren(el("p", { class: "muted" }, "Загружаю…"));
   try {
     [S, extras] = await Promise.all([api("/api/settings"), api("/api/extras").catch(() => null)]);

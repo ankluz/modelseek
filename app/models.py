@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 import re
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -106,8 +107,80 @@ def parse_date(value: Any) -> datetime | None:
 def to_int(value: Any) -> int | None:
     try:
         return int(value) if value is not None else None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
+
+
+MAX_URL = 2048
+MAX_DATA_IMAGE = 300_000
+MAX_COUNT = 10**12
+_INVISIBLE = re.compile(r"[\x00-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]+")
+_WEB_URL = re.compile(r"""^https?://[^\s<>"'`\\]+$""", re.I)
+_DATA_IMAGE = re.compile(r"^data:image/(?:png|jpe?g|gif|webp|avif);base64,[A-Za-z0-9+/=]+$")
+
+
+def _text(value: Any, limit: int) -> str | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        value = str(value)
+    if not isinstance(value, str):
+        return None
+    value = re.sub(r"\s+", " ", _INVISIBLE.sub(" ", value[: limit * 4])).strip()
+    return value[:limit] or None
+
+
+def web_url(value: Any) -> str | None:
+    if not isinstance(value, str) or len(value) > MAX_URL:
+        return None
+    value = value.strip()
+    return value if _WEB_URL.match(value) else None
+
+
+def _count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return int(value) if 0 <= value <= MAX_COUNT else None
+
+
+def _money(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) and 0 <= value <= 10_000_000 else None
+
+
+def _thumbnail(value: Any) -> str | None:
+    if isinstance(value, str) and value.startswith("data:"):
+        return value if len(value) <= MAX_DATA_IMAGE and _DATA_IMAGE.match(value) else None
+    return web_url(value)
+
+
+def clean_hit(h: ModelHit) -> ModelHit | None:
+    """Bring a hit from an untrusted site to sane types and sizes; None when it has no usable link."""
+    url = web_url(h.url)
+    if not url:
+        return None
+    tags = h.tags if isinstance(h.tags, list) else []
+    tags = [t for t in (_text(x, 60) for x in tags[:200]) if t][:40]
+    return replace(
+        h,
+        id=_text(h.id, 200) or url[:200],
+        title=_text(h.title, 300) or "(без названия)",
+        url=url,
+        thumbnail=_thumbnail(h.thumbnail),
+        author=_text(h.author, 120),
+        likes=_count(h.likes), downloads=_count(h.downloads), views=_count(h.views), makes=_count(h.makes),
+        published=h.published if isinstance(h.published, datetime) else None,
+        price=_money(h.price),
+        currency=_text(h.currency, 8),
+        license=_text(h.license, 120),
+        commercial=h.commercial if isinstance(h.commercial, bool) else None,
+        tags=tags,
+        position=h.position if isinstance(h.position, int) and 0 <= h.position < 10_000 else 0,
+    )
 
 
 def first(d: dict, *keys: str, default: Any = None) -> Any:

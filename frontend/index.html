@@ -6,20 +6,11 @@
   <meta name="referrer" content="no-referrer">
   <title>modelseek</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="preload" href="/static/fonts/OrreryText-Regular.woff" as="font" type="font/woff" crossorigin>
+  <link rel="preload" href="/static/fonts/OrreryGauge-Regular.woff" as="font" type="font/woff" crossorigin>
   <link rel="stylesheet" href="/static/themes.css">
   <link rel="stylesheet" href="/static/style.css">
-  <script>    (function () {
-      var ui = {};
-      try { ui = JSON.parse(localStorage.getItem("modelseek.ui") || "{}"); } catch (e) {}
-      var t = ui.theme || "auto";
-      if (t === "auto") t = matchMedia("(prefers-color-scheme: light)").matches ? "latte" : "plate";
-      document.documentElement.dataset.theme = t;
-      document.documentElement.dataset.density = ui.density || "normal";
-    })();
-</script>
+  <script src="/static/boot.js"></script>
 </head>
 <body>
   <header class="top">
@@ -263,6 +254,22 @@
       <a href="https://thangs.com" target="_blank" rel="noopener noreferrer">Thangs ↗</a> — загрузите файл там.</p>
     <div class="dialog-foot"><button id="img-close" type="button" class="btn ghost">Закрыть</button></div>
   </dialog>
+
+  <dialog id="login-dialog" class="dialog" aria-labelledby="login-title">
+    <form id="login-form">
+      <h2 id="login-title">Вход в modelseek</h2>
+      <p class="muted">Владелец закрыл поиск паролем. Спросите его у того, кто дал вам ссылку.</p>
+      <label class="field"><span>Пароль</span>
+        <input id="login-password" type="password" autocomplete="current-password" required></label>
+      <p id="login-error" class="err" hidden></p>
+      <div class="dialog-foot"><button class="btn primary" type="submit">Войти</button></div>
+    </form>
+  </dialog>
+
+  <footer class="foot">
+    <span>modelseek · © 2026 Viktor Shitov · <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0</a></span>
+    <a id="source-link" href="/source.zip">Исходный код</a>
+  </footer>
 
   <div id="fav-pop" class="pop fav-pop" role="dialog" aria-label="Добавить в коллекцию" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

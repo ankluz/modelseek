@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +12,9 @@ from typing import Any
 from urllib.parse import urlencode, urlparse
 
 import httpx
+
+from .netguard import (MAX_REDIRECTS, MAX_RESPONSE_BYTES, REDIRECTS, NetGuard, ResponseTooLarge, decode,
+                       keeps_credentials, next_hop, read_limited)
 
 log = logging.getLogger("modelseek.fetch")
 
@@ -54,38 +59,146 @@ class Fetcher:
         raise NotImplementedError
 
 
-class HttpFetcher(Fetcher):
-    mode = "http"
+class RedirectingFetcher(Fetcher):
+    """Follows redirects itself: every hop is checked, and keys never travel to another site."""
 
-    def __init__(self, client: httpx.AsyncClient):
-        self.client = client
+    max_bytes = MAX_RESPONSE_BYTES
+    guard: NetGuard | None = None
+
+    async def _send(self, method: str, url: str, params, headers: dict, auth, payload):
+        raise NotImplementedError
+
+    async def _request(self, method: str, url: str, params=None, headers=None, auth=None, payload=None) -> FetchResult:
+        headers = dict(headers or {})
+        for _ in range(MAX_REDIRECTS + 1):
+            status, location, final, body = await self._send(method, url, params, headers, auth, payload)
+            if status not in REDIRECTS or not location:
+                return FetchResult(status, body, final)
+            method, target = next_hop(method, status, final, location)
+            if not keeps_credentials(final, target):
+                headers, auth = {}, None
+                if self.guard is not None:
+                    await self.guard.check(target, use_trust=False)
+            if method == "GET":
+                payload = None
+            url, params = target, None
+        raise httpx.TooManyRedirects(f"больше {MAX_REDIRECTS} перенаправлений")
 
     async def get(self, url, params=None, headers=None, auth=None):
-        r = await self.client.get(url, params=params, headers=headers, auth=auth)
-        return FetchResult(r.status_code, r.text, str(r.url))
+        return await self._request("GET", url, params, headers, auth)
 
     async def post_json(self, url, payload, headers=None, auth=None):
-        r = await self.client.post(url, json=payload, headers=headers, auth=auth)
-        return FetchResult(r.status_code, r.text, str(r.url))
+        return await self._request("POST", url, None, headers, auth, payload)
 
 
-class ImpersonateFetcher(Fetcher):
+class HttpFetcher(RedirectingFetcher):
+    mode = "http"
+
+    def __init__(self, client: httpx.AsyncClient, guard: NetGuard | None = None):
+        self.client = client
+        self.guard = guard
+
+    async def _send(self, method, url, params, headers, auth, payload):
+        req = self.client.build_request(method, url, params=params, headers=headers,
+                                        json=payload if method == "POST" else None)
+        r = await self.client.send(req, auth=auth, follow_redirects=False, stream=True)
+        try:
+            if r.status_code in REDIRECTS:
+                return r.status_code, r.headers.get("location"), str(r.url), ""
+            data = await read_limited(r.aiter_bytes(), r.headers.get("content-length"), self.max_bytes)
+            return r.status_code, None, str(r.url), decode(data, r.encoding)
+        finally:
+            await r.aclose()
+
+
+@dataclass(frozen=True)
+class PlannedRequest:
+    """The one request a source makes for a search, for a guest's browser to send itself."""
+    method: str
+    url: str
+    headers: tuple[tuple[str, str], ...] = ()
+    body: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"method": self.method, "url": self.url, "headers": dict(self.headers), "body": self.body}
+
+
+class Planned(Exception):
+    def __init__(self, request: PlannedRequest):
+        super().__init__(request.url)
+        self.request = request
+
+
+# A browser sets these itself or refuses them; anything else would make the request differ from the plan
+BROWSER_HEADERS = {"authorization", "content-type", "accept"}
+
+
+def _planned(method: str, url: str, headers: dict | None, auth: tuple[str, str] | None,
+             payload: Any = None) -> PlannedRequest:
+    h = {str(k).lower(): str(v) for k, v in (headers or {}).items() if str(k).lower() in BROWSER_HEADERS}
+    if auth:
+        h["authorization"] = "Basic " + base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode()
+    body = None
+    if method == "POST":
+        body = json.dumps(payload, ensure_ascii=False)
+        h.setdefault("content-type", "application/json")
+    return PlannedRequest(method, url, tuple(sorted(h.items())), body)
+
+
+class PlanFetcher(Fetcher):
+    """Records the request instead of sending it."""
+    mode = "plan"
+
+    async def get(self, url, params=None, headers=None, auth=None):
+        raise Planned(_planned("GET", _with_params(url, params), headers, auth))
+
+    async def post_json(self, url, payload, headers=None, auth=None):
+        raise Planned(_planned("POST", url, headers, auth, payload))
+
+
+class ReplayFetcher(Fetcher):
+    """Hands a source the answer a guest's browser already got for exactly the planned request."""
+    mode = "guest-browser"
+
+    def __init__(self, request: PlannedRequest, result: FetchResult):
+        self.request, self.result, self.used = request, result, False
+
+    def _take(self, asked: PlannedRequest) -> FetchResult:
+        if self.used or (asked.method, asked.url) != (self.request.method, self.request.url):
+            raise FetchUnavailable("ответ из браузера не подходит к запросу")
+        self.used = True
+        return self.result
+
+    async def get(self, url, params=None, headers=None, auth=None):
+        return self._take(_planned("GET", _with_params(url, params), headers, auth))
+
+    async def post_json(self, url, payload, headers=None, auth=None):
+        return self._take(_planned("POST", url, headers, auth, payload))
+
+
+class ImpersonateFetcher(RedirectingFetcher):
     mode = "impersonate"
 
-    def __init__(self, timeout: float, target: str = "chrome"):
+    def __init__(self, timeout: float, target: str = "chrome", guard: NetGuard | None = None):
         try:
             from curl_cffi.requests import AsyncSession
         except ImportError as e:
             raise FetchUnavailable("не установлен curl_cffi (pip install curl_cffi)") from e
         self._session = AsyncSession(impersonate=target, timeout=timeout)
+        self.guard = guard or NetGuard()
 
-    async def get(self, url, params=None, headers=None, auth=None):
-        r = await self._session.get(url, params=params, headers=headers, auth=auth)
-        return FetchResult(r.status_code, r.text, str(r.url))
-
-    async def post_json(self, url, payload, headers=None, auth=None):
-        r = await self._session.post(url, json=payload, headers=headers, auth=auth)
-        return FetchResult(r.status_code, r.text, str(r.url))
+    async def _send(self, method, url, params, headers, auth, payload):
+        await self.guard.check(str(httpx.URL(url, params=params)) if params else url)
+        r = await self._session.request(method, url, params=params, headers=headers, auth=auth,
+                                        json=payload if method == "POST" else None,
+                                        allow_redirects=False, stream=True)
+        try:
+            if r.status_code in REDIRECTS:
+                return r.status_code, r.headers.get("location"), str(r.url), ""
+            data = await read_limited(r.aiter_content(), r.headers.get("content-length"), self.max_bytes)
+            return r.status_code, None, str(r.url), decode(data, getattr(r, "charset", None) or r.encoding)
+        finally:
+            await r.aclose()
 
     async def aclose(self):
         await self._session.close()
@@ -94,8 +207,10 @@ class ImpersonateFetcher(Fetcher):
 class BrowserManager:
 
     def __init__(self, profile_dir: str | Path, headless: bool = True, executable_path: str | None = None,
-                 nav_timeout: float = 25.0):
+                 nav_timeout: float = 25.0, guard: NetGuard | None = None):
         self.profile_dir = Path(profile_dir)
+        self.guard = guard or NetGuard()
+        self.blocked: list[str] = []
         self.headless = headless
         self.executable_path = executable_path or None
         self.nav_timeout = nav_timeout
@@ -149,13 +264,19 @@ class BrowserManager:
         kwargs: dict[str, Any] = {
             "headless": not headed,
             "viewport": {"width": 1280, "height": 860},
-            "args": ["--disable-blink-features=AutomationControlled"],
+            "args": ["--disable-blink-features=AutomationControlled",
+                     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+            "accept_downloads": False,
+            "service_workers": "block",
         }
         if self.executable_path:
             kwargs["executable_path"] = self.executable_path
         if not headed and self._ua_file.exists():
             kwargs["user_agent"] = self._ua_file.read_text(encoding="utf-8").strip()
         self._ctx = await self._pw.chromium.launch_persistent_context(str(self.profile_dir), **kwargs)
+        await self._ctx.route("**/*", self._route)
+        if hasattr(self._ctx, "route_web_socket"):
+            await self._ctx.route_web_socket(re.compile(".*"), self._route_ws)
         self._ctx_headed = headed
         self._pages.clear()
         if headed:
@@ -170,6 +291,26 @@ class BrowserManager:
             self._ua_file.parent.mkdir(parents=True, exist_ok=True)
             self._ua_file.write_text(ua, encoding="utf-8")
             await self._start(headed=False)
+
+    def _note_blocked(self, url: str):
+        self.blocked = (self.blocked + [url[:200]])[-20:]
+        log.warning("browser: blocked request to %s", url[:200])
+
+    async def _route(self, route):
+        url = route.request.url
+        if not url.startswith(("http://", "https://")) or await self.guard.allowed(url):
+            await route.continue_()
+        else:
+            self._note_blocked(url)
+            await route.abort("blockedbyclient")
+
+    async def _route_ws(self, ws):
+        url = re.sub(r"^ws", "http", ws.url)
+        if await self.guard.allowed(url):
+            ws.connect_to_server()
+        else:
+            self._note_blocked(ws.url)
+            await ws.close(code=1008, reason="blocked")
 
     async def _close_ctx(self):
         if self._ctx is not None:
@@ -194,14 +335,18 @@ class BrowserManager:
                 return FetchResult(409, "browser is busy: waiting for the user to pass the check", url)
             await self._start(headed=False)
             page = await self._page_for(origin)
-            js = """async ([url, method, body, headers]) => {
+            js = """async ([url, method, body, headers, max]) => {
                 const r = await fetch(url, {method, body, headers, credentials: 'include'});
-                return [r.status, await r.text(), r.url];
+                const t = await r.text();
+                return [r.status, t.length > max ? null : t, r.url];
             }"""
-            status, text, final = await page.evaluate(js, [url, method, body, headers])
-            if status in (403, 503) and any(m in text[:4000].lower() for m in CHALLENGE_MARKERS):
+            args = [url, method, body, headers, MAX_RESPONSE_BYTES]
+            status, text, final = await page.evaluate(js, args)
+            if text is not None and status in (403, 503) and any(m in text[:4000].lower() for m in CHALLENGE_MARKERS):
                 await page.goto(origin, wait_until="domcontentloaded", timeout=self.nav_timeout * 1000)
-                status, text, final = await page.evaluate(js, [url, method, body, headers])
+                status, text, final = await page.evaluate(js, args)
+            if text is None:
+                raise ResponseTooLarge(f"ответ больше {MAX_RESPONSE_BYTES // 2**20} МБ")
             return FetchResult(int(status), text, final)
 
     async def _open_for_user(self, origin: str):
@@ -251,6 +396,7 @@ class BrowserManager:
             "headed": self._ctx_headed,
             "waiting_user": bool(self.user_window and not self.user_window.get("done")),
             "origin": (self.user_window or {}).get("origin"),
+            "blocked": self.blocked[-5:],
         }
 
     async def aclose(self):

@@ -22,7 +22,8 @@ After=network-online.target
 [Service]
 WorkingDirectory=$DIR
 EnvironmentFile=-$DIR/.env
-ExecStart=$DIR/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port ${MODELSEEK_PORT:-8088}
+Environment=MODELSEEK_PORT=${MODELSEEK_PORT:-8088}
+ExecStart=$DIR/.venv/bin/python -m app.serve
 Restart=on-failure
 
 [Install]
