@@ -1,5 +1,6 @@
 .env
 data/
+modelseek-backup/
 .venv/
 __pycache__/
 .pytest_cache/

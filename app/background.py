@@ -1,4 +1,4 @@
-"""Запуск без консоли: pythonw не даёт stdout и stderr, поэтому пишем их в файл."""
+"""Запуск без консоли: pythonw не даёт stdout и stderr, поэтому они пишутся в файл."""
 from __future__ import annotations
 
 import sys

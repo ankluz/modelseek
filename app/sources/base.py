@@ -111,9 +111,9 @@ class Source:
     @staticmethod
     def check(resp: FetchResult) -> Any:
         if resp.looks_like_challenge:
-            raise ChallengeError("сайт показал проверку «вы не бот»")
+            raise ChallengeError("сайт показал проверку на бота")
         if resp.status == 409:
-            raise SourceError("ждём, пока вы пройдёте проверку в окне браузера")
+            raise SourceError("проверка открыта в окне браузера и ещё не пройдена")
         if resp.status in (401, 403):
             raise SourceError(f"доступ запрещён (HTTP {resp.status}) — проверьте ключ или включите режим browser")
         if resp.status == 429:

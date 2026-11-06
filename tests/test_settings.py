@@ -112,6 +112,35 @@ def test_secrets_file_and_env(tmp_path, monkeypatch):
         st.set_secrets({"OK_NAME": "a\nB=c"})
 
 
+def test_secrets_survive_restart_and_env_file_wins(tmp_path, monkeypatch):
+    monkeypatch.delenv("MS_TEST_A", raising=False)
+    monkeypatch.delenv("MS_TEST_B", raising=False)
+    Settings(_merge(DEFAULTS, {}), None, tmp_path).set_secrets({"MS_TEST_A": "from-ui", "MS_TEST_B": "from-ui"})
+    assert not (tmp_path / "secrets.env.tmp").exists()
+    if os.name != "nt":
+        assert (tmp_path / "secrets.env").stat().st_mode & 0o077 == 0
+    # A fresh container: the variables are gone, the file on the volume is not; .env fills MS_TEST_B.
+    monkeypatch.delenv("MS_TEST_A")
+    monkeypatch.setenv("MS_TEST_B", "from-env-file")
+    Settings(_merge(DEFAULTS, {}), None, tmp_path)
+    assert os.environ["MS_TEST_A"] == "from-ui"
+    assert os.environ["MS_TEST_B"] == "from-env-file"
+
+
+def test_failed_secret_write_changes_nothing(app_client, monkeypatch):
+    c = app_client
+    monkeypatch.delenv("TEST_CULTS_KEY", raising=False)
+    def deny(self, target):
+        raise PermissionError(13, "Permission denied", str(target))
+    monkeypatch.setattr("pathlib.Path.replace", deny)
+    r = c.put("/api/secrets", json={"values": {"TEST_CULTS_KEY": "k"}}, headers=H)
+    assert r.status_code == 500 and "не удалось записать" in r.json()["error"]
+    assert "TEST_CULTS_KEY" not in os.environ
+    assert not (c.tmp / "secrets.env.tmp").exists()
+    r = c.patch("/api/settings", json={"patch": {"server": {"per_source_limit": 10}}}, headers=H)
+    assert r.status_code == 500 and "не удалось записать" in r.json()["error"]
+
+
 
 def test_settings_patch_applies_without_restart(app_client):
     c = app_client
@@ -244,7 +273,7 @@ def test_ollama_pull_progress(monkeypatch):
     job = installer.Job("t", "t")
     installer.pull_model(job, "http://ollama.test/v1", "qwen2.5:3b")
     assert job.status == "ok" and job.progress == 1.0
-    assert job.log[0].startswith("Скачиваю") and any("100%" in l for l in job.log)
+    assert job.log[0].startswith("Скачивание") and any("100%" in l for l in job.log)
 
 
 def test_custom_source_without_id_keeps_models_apart():

@@ -2,7 +2,7 @@ server:
   cache_ttl_seconds: 900
   request_timeout_seconds: 10
   per_source_limit: 24
-  user_agent: "modelseek/0.3 (local model search)"
+  user_agent: "modelseek/1.0 (local model search)"
   data_dir: data
   # Имена, по которым можно открывать modelseek, кроме 127.0.0.1 и localhost
   allowed_hosts: []
@@ -139,5 +139,5 @@ public:
   allowed_hosts: []         # имена сайта, по которым пускать (Host); пусто — любые
   trusted_proxies: []       # адреса своего reverse proxy, чтобы видеть настоящий IP гостя
   source_url: ""            # ссылка на исходный код для гостей (AGPL); пусто — архив /source.zip
-  # Гости ищут со своими ключами (вводят у себя в настройках). true — если ключа у гостя нет, брать ваш
+  # Гости ищут со своими ключами (вводят у себя в настройках). true — гость без своего ключа ищет с ключом владельца
   lend_keys: false

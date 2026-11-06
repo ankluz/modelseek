@@ -18,14 +18,14 @@ if [ -z "$PY" ]; then
 fi
 
 if [ ! -x .venv/bin/python ]; then
-  echo "[modelseek] Создаю окружение .venv ($PY)…"
+  echo "[modelseek] Создание окружения .venv ($PY)…"
   if ! "$PY" -m venv .venv; then
     echo "Не удалось создать .venv. Debian/Ubuntu: sudo apt install python3-venv" >&2
     exit 1
   fi
 fi
 
-echo "[modelseek] Проверяю зависимости…"
+echo "[modelseek] Проверка зависимостей…"
 .venv/bin/python -m pip install -q --disable-pip-version-check -r requirements.txt
 
 if [ ! -f .env ] && [ -f .env.example ]; then

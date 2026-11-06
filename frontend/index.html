@@ -85,7 +85,7 @@
 
     <div id="empty" class="empty">
       <h1>Один поиск по всем сайтам с моделями</h1>
-      <p>Рейтинг считается у вас: крутите веса и фильтры — выдача пересчитается без новых запросов к сайтам.
+      <p>Веса и фильтры пересчитывают выдачу сразу, без новых запросов к сайтам.
          Над результатами появятся темы, чтобы быстро уточнить неоднозначный запрос.</p>
       <div class="examples">
         <button type="button" data-q="gridfinity">gridfinity</button>
@@ -225,7 +225,7 @@
     <form method="dialog" id="sub-form">
       <h2>Подписка на запрос</h2>
       <p class="muted">Будут сохранены текущие фильтры, источники и веса. Первый прогон запомнит то, что есть сейчас,
-        дальше вы увидите только новое.</p>
+        дальше в подписке появляются только новые модели.</p>
       <label class="field"><span>Запрос</span><input id="sub-query" type="text" required></label>
       <label class="field"><span>Как часто проверять</span><select id="sub-interval"></select></label>
       <label class="field" id="sub-custom-wrap" hidden><span>Каждые N минут (от 15)</span>
@@ -258,7 +258,7 @@
   <dialog id="login-dialog" class="dialog" aria-labelledby="login-title">
     <form id="login-form">
       <h2 id="login-title">Вход в modelseek</h2>
-      <p class="muted">Владелец закрыл поиск паролем. Спросите его у того, кто дал вам ссылку.</p>
+      <p class="muted">Владелец закрыл поиск паролем. Пароль сообщает владелец этой установки.</p>
       <label class="field"><span>Пароль</span>
         <input id="login-password" type="password" autocomplete="current-password" required></label>
       <p id="login-error" class="err" hidden></p>

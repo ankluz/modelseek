@@ -7,10 +7,10 @@ if [ ! -x .venv/bin/python ]; then
   exit 1
 fi
 
-echo "[modelseek] Ставлю дополнительные модули…"
+echo "[modelseek] Установка дополнительных модулей…"
 .venv/bin/python -m pip install --disable-pip-version-check -r requirements-extra.txt
 
-echo "[modelseek] Скачиваю Chromium для режима browser (~150 МБ)…"
+echo "[modelseek] Скачивание Chromium для режима browser (~150 МБ)…"
 .venv/bin/python -m playwright install chromium
 
 if command -v apt-get >/dev/null 2>&1; then

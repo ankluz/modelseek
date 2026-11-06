@@ -84,7 +84,7 @@ function subCard(s) {
     el("div", { class: "sub-ctrl" }, sel, toggle,
       el("button", { type: "button", class: "btn small", onclick: async (e) => {
         e.target.disabled = true;
-        e.target.textContent = "Проверяю…";
+        e.target.textContent = "Проверка…";
         const r = await api(`/api/subs/${s.id}/run`, { method: "POST" });
         toast(r.run.ok ? (r.run.new ? `Новых моделей: ${r.run.new}` : "Новых нет") : "Ошибка: " + r.run.error, 4000);
         showSubs();

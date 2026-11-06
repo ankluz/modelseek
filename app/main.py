@@ -50,6 +50,13 @@ def err(msg: str, code: int = 400) -> JSONResponse:
     return JSONResponse({"error": msg}, status_code=code)
 
 
+def write_failed(e: OSError) -> JSONResponse:
+    where = f" {e.filename}" if e.filename else ""
+    hint = (" Папка данных принадлежит не пользователю modelseek, нужен chown"
+            " (README, раздел Docker)." if dockernet.IN_DOCKER else "")
+    return err(f"не удалось записать{where}: {e.strerror or e}.{hint}", 500)
+
+
 def hostname(value: str | None, with_scheme: bool = False) -> str:
     try:
         return (urlsplit(value if with_scheme else f"//{value}").hostname or "").lower()
@@ -320,6 +327,8 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
             settings.patch(patch)
         except (ValueError, TypeError) as e:
             return err(str(e))
+        except OSError as e:
+            return write_failed(e)
         await rt.reload()
         return JSONResponse(settings_payload())
 
@@ -327,7 +336,10 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
         section = (await body(request)).get("section")
         if section is not None and section not in EDITABLE:
             return err("нет такого раздела")
-        settings.reset(section)
+        try:
+            settings.reset(section)
+        except OSError as e:
+            return write_failed(e)
         await rt.reload()
         return JSONResponse(settings_payload())
 
@@ -339,6 +351,8 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
             settings.set_secrets({str(k): (None if v is None else str(v)) for k, v in values.items()})
         except ValueError as e:
             return err(str(e))
+        except OSError as e:
+            return write_failed(e)
         await rt.reload()
         return JSONResponse(settings_payload())
 

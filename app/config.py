@@ -230,25 +230,39 @@ class Settings:
     def set_secrets(self, values: dict[str, str | None]) -> None:
         with self._lock:
             cur = self._read_secrets()
+            clean: dict[str, str] = {}
             for k, v in values.items():
                 if not ENV_NAME.match(k):
                     raise ValueError(f"недопустимое имя переменной: {k}")
                 v = (v or "").strip()
                 if "\n" in v or "\r" in v:
                     raise ValueError("значение не может содержать перевод строки")
+                clean[k] = v
                 if v:
                     cur[k] = v
-                    os.environ[k] = v
                 else:
                     cur.pop(k, None)
-                    os.environ.pop(k, None)
+            # The file first, the environment after: a failed write must not leave a key that lives only in memory.
             self.secrets_path.parent.mkdir(parents=True, exist_ok=True)
             body = "".join(f"{k}={v}\n" for k, v in sorted(cur.items()))
-            self.secrets_path.write_text(body, encoding="utf-8")
+            tmp = self.secrets_path.with_name(self.secrets_path.name + ".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(body)
+                tmp.replace(self.secrets_path)
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
             try:
                 os.chmod(self.secrets_path, 0o600)
             except OSError:
                 pass
+            for k, v in clean.items():
+                if v:
+                    os.environ[k] = v
+                else:
+                    os.environ.pop(k, None)
 
 
 def _merge_keep_null(base: dict, over: dict) -> dict:

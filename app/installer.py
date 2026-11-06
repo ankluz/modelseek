@@ -177,7 +177,7 @@ def install_extras(job: Job, keys: list[str]):
     _ensure_user_site()
     importlib.invalidate_caches()
     if "playwright" in keys:
-        job.write("Скачиваю Chromium для режима browser (~150 МБ)…")
+        job.write("Скачивание Chromium для режима browser (~150 МБ)…")
         code = run_cmd(job, [sys.executable, "-m", "playwright", "install", "chromium"])
         if code != 0:
             job.done(False, f"Не удалось скачать Chromium (код {code})")
@@ -284,7 +284,7 @@ def pull_model(job: Job, url: str, model: str):
         job.done(False, "Некорректное имя модели")
         return
     base = ollama_base(url)
-    job.write(f"Скачиваю модель {model}…")
+    job.write(f"Скачивание модели {model}…")
     last = ""
     with httpx.Client(timeout=httpx.Timeout(30, read=None)) as c:
         with c.stream("POST", f"{base}/api/pull", json={"model": model, "stream": True}) as r:
@@ -314,7 +314,7 @@ def pull_model(job: Job, url: str, model: str):
 
 
 def warm_embeddings(job: Job, embedder) -> None:
-    job.write(f"Загружаю {embedder.model_name} (≈220 МБ при первом запуске)…")
+    job.write(f"Загрузка {embedder.model_name} (≈220 МБ при первом запуске)…")
     embedder._load()
     embedder._embed(["test"])
     job.done(True, "Модель смыслового поиска готова")

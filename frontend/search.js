@@ -39,7 +39,7 @@ export function renderChips() {
     let tail = null;
     if (!src.configured) {
       b.classList.add("disabled");
-      b.title = GUEST ? "Нужен ваш ключ этого сайта: Настройки → Ключи сайтов" : "Нужен ключ в .env: " + src.missing.join(", ");
+      b.title = GUEST ? "Нужен свой ключ этого сайта: Настройки → Ключи сайтов" : "Нужен ключ в .env: " + src.missing.join(", ");
       tail = el("span", { class: "st" }, "нет ключа");
     } else if (st && on) {
       const map = {
@@ -52,7 +52,7 @@ export function renderChips() {
       };
       tail = (map[st.status] || (() => null))();
       if (st.error) b.title = st.error;
-      else if (st.via === "browser") b.title = "Ваш браузер спросил сайт сам";
+      else if (st.via === "browser") b.title = "Ответ получен браузером напрямую от сайта";
     }
     if (src.mode === "browser" || src.mode === "impersonate") b.append(el("span", { class: "mode", title: "режим " + src.mode }, src.mode === "browser" ? "🌐" : "🎭"));
     if (tail) b.append(tail);
@@ -143,7 +143,7 @@ export async function search(query, page = 1) {
   if (page === 1) {
     cur.pages = [];
     if (newQuery) { cur.statuses = {}; showSkeletons(); $("#facets").hidden = true; }
-    $("#summary").textContent = "Ищу…";
+    $("#summary").textContent = "Поиск…";
   }
   $("#more").disabled = true;
   if (location.hash !== "#search" || new URLSearchParams(location.search).get("q") !== query) {
@@ -219,7 +219,7 @@ function render(snap) {
   const pending = snap.sources.filter((s) => s.status === "pending").length;
   let text = `${hits.length} моделей · ${snap.took_ms} мс`;
   if (snap.translated) text += ` · искали по-английски: «${snap.translated}»`;
-  if (pending) text += ` · ждём ещё ${pending}`;
+  if (pending) text += ` · ещё отвечают: ${pending}`;
   if (errs.length) text += ` · не ответили: ${errs.join(", ")}`;
   if (snap.done && !hits.length) text += " · ничего не найдено. Попробуйте запрос на английском или ослабьте фильтры";
   $("#summary").textContent = text;
@@ -298,7 +298,7 @@ async function createSub(e) {
   const interval = sel.value === "custom" ? Math.max(15, Number($("#sub-custom").value) || 180) : Number(sel.value);
   const btn = $("#sub-create");
   btn.disabled = true;
-  btn.textContent = "Запоминаю текущую выдачу…";
+  btn.textContent = "Сохранение текущей выдачи…";
   try {
     const r = await api("/api/subs", { method: "POST",
       body: { query: $("#sub-query").value.trim(), interval_min: interval, params: subscriptionParams() } });
