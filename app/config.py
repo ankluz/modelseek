@@ -14,7 +14,7 @@ DEFAULTS: dict[str, Any] = {
         "cache_ttl_seconds": 900,
         "request_timeout_seconds": 10,
         "per_source_limit": 24,
-        "user_agent": "modelseek/0.3 (local model search)",
+        "user_agent": "modelseek/1.0 (local model search)",
         "data_dir": "data",
         "allowed_hosts": [],
     },

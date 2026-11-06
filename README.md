@@ -315,7 +315,7 @@ HTTP идут открытым текстом. Адрес прокси укаж�
 | `server.cache_ttl_seconds` | 900 | сколько секунд держать ответы сайтов в памяти |
 | `server.request_timeout_seconds` | 10 | таймаут на один источник (в режиме browser ×4) |
 | `server.per_source_limit` | 24 | результатов с каждого сайта за страницу |
-| `server.user_agent` | `modelseek/0.3 …` | User-Agent для режима http |
+| `server.user_agent` | `modelseek/1.0 …` | User-Agent для режима http |
 | `server.data_dir` | `data` | база, настройки, ключи, профиль браузера, модели (только config.yaml или переменная окружения) |
 | `server.allowed_hosts` | `[]` | дополнительные адреса и имена, по которым открывают modelseek; `127.0.0.1`, `localhost` и `::1` разрешены всегда (только config.yaml или переменная окружения) |
 | `breaker.max_failures` | 3 | ошибок подряд до паузы источника (0 — не отключать) |

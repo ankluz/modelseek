@@ -24,6 +24,10 @@ RUN pip install -r requirements.txt \
 COPY app ./app
 COPY frontend ./frontend
 COPY config.yaml ./config.yaml
+# The rest of the source, for the "Исходный код" archive (/source.zip) required by AGPL-3.0
+COPY tests ./tests
+COPY LICENSE *.md Dockerfile docker-compose.yml .env.example .dockerignore .gitignore \
+     requirements-dev.txt *.sh *.bat ./
 
 RUN useradd --create-home --user-group modelseek \
  && mkdir -p /app/data \
