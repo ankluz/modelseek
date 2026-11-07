@@ -36,9 +36,9 @@ log = logging.getLogger("modelseek")
 
 MODE_INFO = {
     "http": "Обычные запросы. Для официальных API и сайтов без защиты.",
-    "link": "Не опрашивать — только ссылка «искать на сайте». Надёжно, но без карточек.",
-    "impersonate": "Запрос с отпечатком Chrome (curl_cffi). Обходит защиту от ботов — против правил сайтов.",
-    "browser": "Настоящий Chromium; проверку проходите сами в окне. Обходит защиту — против правил сайтов.",
+    "link": "Сайт не опрашивается, показывается только ссылка на поиск по нему, без карточек.",
+    "impersonate": "Запрос с отпечатком Chrome (curl_cffi). Обходит защиту от ботов, что нарушает правила сайтов.",
+    "browser": "Chromium; проверка проходится вручную в окне браузера. Обходит защиту от ботов, что нарушает правила сайтов.",
 }
 
 
@@ -405,7 +405,7 @@ def create_app(cfg: dict[str, Any] | None = None, transport: httpx.AsyncBaseTran
         n: Notifier = rt.notifier
         if not n.enabled:
             return err("уведомления не настроены")
-        e = await n.send("modelseek", "Тестовое уведомление: всё работает 👍")
+        e = await n.send("modelseek", "Тестовое уведомление modelseek.")
         return err(e, 502) if e else JSONResponse({"ok": True})
 
     def job_started(job) -> JSONResponse:

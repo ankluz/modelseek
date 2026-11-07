@@ -31,7 +31,7 @@
 
     <form id="search-form" class="search" role="search" autocomplete="off">
       <input id="q" name="q" type="search" spellcheck="false" aria-label="Поисковый запрос"
-             placeholder="Что напечатаем? gridfinity, headphone holder, держатель…" aria-autocomplete="list" aria-controls="history-pop">
+             placeholder="Поиск моделей: gridfinity, headphone holder, держатель…" aria-autocomplete="list" aria-controls="history-pop">
       <kbd class="hint" aria-hidden="true">/</kbd>
       <button id="img-open" type="button" class="btn icon cam" aria-label="Поиск по картинке" title="Поиск по картинке">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
@@ -104,7 +104,7 @@
     </div>
     <section id="fav-grid" class="grid" aria-label="Избранные модели"></section>
     <div id="fav-empty" class="empty small" hidden>
-      <p>Пока пусто. Нажмите ♡ на карточке в поиске — модель попадёт сюда. Коллекции создаются там же.</p>
+      <p>Избранное пусто. Модели добавляются кнопкой ♡ на карточке в поиске, там же создаются коллекции.</p>
     </div>
   </section>
 
@@ -190,13 +190,13 @@
       <label class="field"><span>Исключить слова</span><input id="f-exclude" type="text" placeholder="nsfw, remix"></label>
       <label class="field"><span>Скрыть авторов</span><input id="f-exclude_authors" type="text" placeholder="ник1, ник2"></label>
       <label class="check"><input id="f-has_image" type="checkbox"> Только с превью</label>
-      <label class="check"><input id="f-hide_seen" type="checkbox"> Скрыть уже открытые мной</label>
+      <label class="check"><input id="f-hide_seen" type="checkbox"> Скрыть уже открытые</label>
       <label class="check"><input id="dedupe" type="checkbox" checked> Склеивать одну модель с разных сайтов</label>
     </section>
 
     <section>
       <h3>Веса сигналов</h3>
-      <p class="muted">Нормируются к сумме 1. Нажмите на балл в карточке — увидите разбивку.</p>
+      <p class="muted">Нормируются к сумме 1. Разбивка балла открывается нажатием на балл в карточке.</p>
       <div id="weights"></div>
       <label class="field"><span>Период полураспада свежести, дней</span><input id="half_life" type="number" min="7" max="3650" step="1"></label>
     </section>
@@ -239,7 +239,7 @@
 
   <dialog id="img-dialog" class="dialog wide" aria-labelledby="img-title">
     <h2 id="img-title">Поиск по картинке</h2>
-    <p class="muted">Картинку ищут сервисы, которые это умеют: она откроется у них в новой вкладке и уйдёт на их сервер.
+    <p class="muted">Картинку ищут внешние сервисы: она отправляется на их сервер, результат открывается в новой вкладке.
       modelseek её не сохраняет.</p>
     <div id="img-drop" class="drop" tabindex="0" role="button" aria-label="Выбрать картинку">
       <b>Перетащите фото сюда</b>

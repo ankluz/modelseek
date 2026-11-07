@@ -53,7 +53,7 @@ async function patch(p, msg = "Сохранено") {
     toast(msg);
     await onSaved();
     return true;
-  } catch (e) { toast("Не сохранилось: " + e.message, 7000); return false; }
+  } catch (e) { toast("Не сохранено: " + e.message, 7000); return false; }
 }
 
 async function saveSecret(name, value) {
@@ -64,7 +64,7 @@ async function saveSecret(name, value) {
       S.public?.docker && value ? 6000 : 2600);
     await onSaved();
     return true;
-  } catch (e) { toast("Не сохранилось: " + e.message, 6000); return false; }
+  } catch (e) { toast("Не сохранено: " + e.message, 6000); return false; }
 }
 
 function secretField(envName, label, help) {
@@ -106,7 +106,7 @@ function jobConsole() {
         bar.hidden = j.progress == null;
         bar.firstChild.style.width = ((j.progress || 0) * 100) + "%";
         if (j.status !== "running") {
-          status.textContent = j.status === "ok" ? "Готово" : "Не получилось — подробности в логе";
+          status.textContent = j.status === "ok" ? "Готово" : "Ошибка — подробности в журнале";
           status.className = "jstatus " + (j.status === "ok" ? "ok" : "err");
           return j.status;
         }
@@ -195,7 +195,7 @@ function customEditor(name, c, onClose) {
   const isNew = !name;
   const f = {
     name: text(name || "", { placeholder: "mysite", pattern: "[a-z0-9][a-z0-9_-]*", disabled: !isNew }),
-    label: text(c.label || "", { placeholder: "Мой сайт" }),
+    label: text(c.label || "", { placeholder: "Название сайта" }),
     color: el("input", { type: "color", value: c.color || "#8a8f98" }),
     mode: select(c.mode || "http", [["http", "http"], ["impersonate", "impersonate"], ["browser", "browser"], ["link", "link — только ссылка"]]),
     weight: num(c.weight ?? 1, { min: 0, max: 10, step: 0.05 }),
@@ -344,8 +344,8 @@ function sectionCustom() {
   addLink.addEventListener("click", () => { links.push({ name: "", label: "", url: "", color: "#888888" }); paintLinks(); });
 
   return [
-    panel("Свои источники с API", "Сайты с JSON-ответом: настраиваются без кода, с проверкой прямо здесь.",
-      list.length ? el("div", { class: "src-list" }, ...list) : el("p", { class: "muted" }, "Пока нет."),
+    panel("Свои источники с API", "Сайты с JSON-ответом настраиваются без кода, с проверкой в этом разделе.",
+      list.length ? el("div", { class: "src-list" }, ...list) : el("p", { class: "muted" }, "Собственных источников нет."),
       saveRow("Добавить источник", async () => { editing = { name: "", conf: {} }; rerender(); })),
     panel("Сайты-ссылки", "Не опрашиваются: появляются в строке «Искать также на…» под поиском. {q} заменится на запрос.",
       linkRows, addLink,
@@ -410,7 +410,7 @@ function sectionSmart() {
       fs.loaded ? "Модель загружена ✓" : "Скачать модель сейчас"));
   }
   const semPanel = panel("Смысловой поиск — дополнительный модуль",
-    "Не входит в базовую установку. Локальная мультиязычная модель (~220 МБ, работает на процессоре): понимает, что «держатель наушников» и «headphone holder» — одно и то же. Поиск по картинке не требует этого модуля: он идёт через сервисы, которые это умеют (кнопка с камерой у строки поиска).",
+    "Не входит в базовую установку. Локальная мультиязычная модель (~220 МБ, работает на процессоре) сопоставляет запросы по смыслу: «держатель наушников» и «headphone holder». Поиск по картинке работает без этого модуля, через внешние сервисы (кнопка с камерой у строки поиска).",
     el("p", {}, "Статус: ", fastembed ? pill(true, "fastembed установлен", "") : pill(false, "", "fastembed не установлен"), " ",
       sem.enabled ? (fs.available ? pill(true, "включён", "") : pill(false, "", fs.error || "ошибка")) : pill(false, "", "выключен")),
     semOn.node, field("Модель", semModel, "Любая модель из списка fastembed."), semActions, semJob,
@@ -423,7 +423,7 @@ function sectionSmart() {
   const ollamaBox = el("div", { class: "ollama" }, el("p", { class: "muted" }, "Проверка Ollama…"));
   const job = jobConsole();
   const trPanel = panel("Перевод запросов",
-    "Сайты ищут по-английски намного лучше. Переводит локальная модель через Ollama или любой OpenAI-совместимый API (LM Studio, облако).",
+    "Сайты точнее находят модели по английским запросам. Перевод выполняет модель через Ollama или OpenAI-совместимый API (LM Studio, облачный сервис).",
     trOn.node,
     el("div", { class: "row-fields" }, field("Адрес API", trUrl, "Ollama: http://127.0.0.1:11434/v1"), field("Модель", trModel, "Для Ollama: qwen2.5:3b (≈2 ГБ) или qwen2.5:1.5b")),
     field("Переменная с ключом API (если нужен)", trKey),
@@ -449,12 +449,12 @@ async function paintOllama(box, job) {
   if (!o.binary && !o.running) {
     if (o.install.auto) {
       actions.append(el("button", { type: "button", class: "btn", onclick: async () => {
-        if (!confirm(`Установить Ollama через ${o.install.how}? Это примет соглашения источника пакетов.`)) return;
+        if (!confirm(`Установить Ollama через ${o.install.how}? Установка принимает условия источника пакетов.`)) return;
         await job.run(api("/api/ollama/install", { method: "POST" })); again();
       } }, `Установить Ollama (${o.install.how})`));
     } else {
       actions.append(el("p", { class: "muted" },
-        o.install.how === "docker" ? "modelseek работает в Docker. Запустите Ollama рядом: " : o.install.how === "terminal" ? "Установите в терминале: " : "Скачайте установщик: ",
+        o.install.how === "docker" ? "modelseek работает в Docker. Ollama запускается отдельным контейнером: " : o.install.how === "terminal" ? "Установите в терминале: " : "Скачайте установщик: ",
         o.install.command.startsWith("http") ? el("a", { href: o.install.command, target: "_blank", rel: "noopener" }, o.install.command)
           : el("code", {}, o.install.command)));
     }
@@ -497,25 +497,25 @@ function sectionComponents() {
     el("div", { class: "comp-list" }, ...rows), job,
     saveRow("Установить выбранное", async () => {
       const keys = Object.entries(boxes).filter(([, cb]) => cb.checked).map(([k]) => k);
-      if (!keys.length) { toast("Отметьте, что установить"); return; }
+      if (!keys.length) { toast("Не выбрано ни одного компонента"); return; }
       const st = await job.run(api("/api/extras/install", { method: "POST", body: { keys } }));
       await refreshExtras();
       if (st === "ok") { await onSaved(); rerender(); }
     }, chromium ? [chromium] : []),
     el("p", { class: "muted small" }, extras?.docker
-      ? "Если компонентов нет, образ собран без них: выполните docker compose up -d --build."
-      : "Если установка из интерфейса не проходит (нет прав), запустите install-extras.bat или install-extras.sh."))];
+      ? "Компоненты отсутствуют, если образ собран с MODELSEEK_EXTRAS=0; пересборка: docker compose up -d --build."
+      : "Если установка из интерфейса не проходит (нет прав), используется install-extras.bat или install-extras.sh."))];
 }
 
 function sectionNotify() {
   const n = S.config.notify, sub = S.config.subscriptions;
   const every = num(sub.check_every_seconds, { min: 0, max: 86400 });
   const kind = select(n.kind || "", [["", "Не отправлять"], ["ntfy", "ntfy (приложение на телефон)"], ["telegram", "Telegram-бот"], ["webhook", "Webhook (POST JSON)"]]);
-  const url = text(n.url, { placeholder: "https://ntfy.sh/мой-секретный-топик" });
+  const url = text(n.url, { placeholder: "https://ntfy.sh/секретный-топик" });
   const chat = text(n.chat_id, { placeholder: "123456789" });
   const tokenEnv = text(n.token_env || "", { placeholder: "TELEGRAM_BOT_TOKEN" });
   const openUrl = text(n.open_url);
-  const urlF = field("Адрес", url), chatF = field("chat_id", chat, "Напишите боту, затем откройте https://api.telegram.org/bot<токен>/getUpdates — там будет chat.id.");
+  const urlF = field("Адрес", url), chatF = field("chat_id", chat, "После первого сообщения боту chat.id виден на странице https://api.telegram.org/bot<токен>/getUpdates.");
   const tokF = field("Переменная с токеном", tokenEnv, "Для Telegram — токен бота; для ntfy — токен доступа, если топик закрыт.");
   const sync = () => { urlF.hidden = !["ntfy", "webhook"].includes(kind.value); chatF.hidden = kind.value !== "telegram"; tokF.hidden = !kind.value || kind.value === "webhook"; };
   kind.addEventListener("change", sync);
@@ -528,7 +528,7 @@ function sectionNotify() {
       saveRow("Сохранить", () => patch({ subscriptions: { check_every_seconds: Number(every.value) || 0 } }))),
     panel("Уведомления о новых моделях", null, field("Куда", kind), urlF, chatF, tokF,
       n.token_env ? secretField(n.token_env, "Токен") : null,
-      field("Ссылка в уведомлении ведёт на", openUrl, "Адрес modelseek, как его видно с телефона (например, по Tailscale)."),
+      field("Ссылка в уведомлении ведёт на", openUrl, "Адрес modelseek, доступный с телефона (например, через Tailscale)."),
       saveRow("Сохранить", async () => { await patch({ notify: { kind: kind.value, url: url.value.trim(), chat_id: chat.value.trim(), token_env: tokenEnv.value.trim(), open_url: openUrl.value.trim() } }); rerender(); }, [test])),
   ];
 }
@@ -550,11 +550,11 @@ function publicPanel() {
       el("li", {}, "Ключи сайтов: ", p.lend_keys
         ? "гости вводят свои; у кого своего нет, ищут с ключом владельца (public.lend_keys: true)"
         : "гости вводят свои, ключи владельца им не выдаются (их выдачу разрешает public.lend_keys: true)"),
-      p.docker ? el("li", {}, "Docker: другие устройства попадут сюда, если в .env задано ",
-        el("code", {}, "MODELSEEK_PUBLIC_BIND=0.0.0.0"), " (иначе порт открыт только на этом компьютере)") : null,
-      p.addresses_hidden ? el("li", { class: "warn" }, "Часть гостей пришла через шлюз Docker, и их адреса не видны " +
-        "(в Docker Desktop так со всеми): лимиты для них считаются по браузеру, а allow_from и вход subnet их не пропустят. " +
-        "Нужны настоящие адреса — запускайте modelseek без Docker.") : null),
+      p.docker ? el("li", {}, "Docker: доступ для других устройств открывает строка ",
+        el("code", {}, "MODELSEEK_PUBLIC_BIND=0.0.0.0"), " в .env; без неё порт доступен только на этом компьютере") : null,
+      p.addresses_hidden ? el("li", { class: "warn" }, "Часть гостей подключается через шлюз Docker, их адреса не видны " +
+        "(в Docker Desktop это касается всех): лимиты для них считаются по браузеру, а allow_from и вход subnet их не пропускают. " +
+        "Проверка по адресам работает только без Docker.") : null),
     p.password_env ? secretField(p.password_env, "Пароль для гостей",
       p.auth === "password" ? "Смена пароля выводит всех гостей из профиля." : "Нужен, если в config.yaml задано public.auth: password.") : null);
 }
@@ -633,7 +633,7 @@ function sectionServer() {
   };
   const headless = check(bw.headless, "Браузер без окна (окно открывается только для проверки)");
   const reset = el("button", { type: "button", class: "btn ghost danger", onclick: async () => {
-    if (!confirm("Сбросить все настройки, изменённые в интерфейсе? config.yaml и ключи не трогаются.")) return;
+    if (!confirm("Сбросить все настройки, изменённые в интерфейсе? config.yaml и ключи сохранятся.")) return;
     S = await api("/api/settings/reset", { method: "POST", body: {} });
     await onSaved(); toast("Сброшено к config.yaml"); rerender();
   } }, "Сбросить всё к config.yaml");
@@ -645,7 +645,7 @@ function sectionServer() {
       saveRow("Сохранить", () => patch({ server: { request_timeout_seconds: Number(i.timeout.value), per_source_limit: Number(i.limit.value),
         cache_ttl_seconds: Number(i.ttl.value), user_agent: i.ua.value.trim() }, breaker: { max_failures: Number(i.fails.value), cooldown_minutes: Number(i.cool.value) } }))),
     panel("Режимы browser и impersonate", null, headless.node,
-      field("Свой Chrome/Edge вместо встроенного Chromium", i.exe, "Задаётся только в config.yaml (browser.executable_path): так чужая страница не сможет подменить запускаемую программу."),
+      field("Свой Chrome/Edge вместо встроенного Chromium", i.exe, "Задаётся только в config.yaml (browser.executable_path): поэтому сторонняя страница не может подменить запускаемую программу."),
       el("div", { class: "fields-grid" }, field("Загрузка страницы, с", i.nav), field("Отпечаток curl_cffi", i.target, "chrome, edge, safari…")),
       saveRow("Сохранить", () => patch({ browser: { headless: headless.input.checked, nav_timeout_seconds: Number(i.nav.value) },
         impersonate: { target: i.target.value.trim() || "chrome" } }))),

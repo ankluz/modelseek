@@ -34,4 +34,4 @@ systemctl --user daemon-reload
 systemctl --user enable --now modelseek.service
 echo "Готово: modelseek запускается при входе в систему. http://127.0.0.1:${MODELSEEK_PORT:-8088}"
 echo "Статус: systemctl --user status modelseek   Логи: journalctl --user -u modelseek -f"
-echo "Чтобы работал и без входа в систему: sudo loginctl enable-linger $USER"
+echo "Работа без входа в систему: sudo loginctl enable-linger $USER"

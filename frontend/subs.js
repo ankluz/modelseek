@@ -41,7 +41,7 @@ export async function showSubs() {
   const n = state.config.features.notify;
   $("#notify-state").replaceChildren(n.enabled
     ? el("span", {}, `Уведомления: ${n.kind}. `, el("button", { type: "button", class: "linkish", onclick: testNotify }, "отправить тест"))
-    : el("span", {}, "Уведомления не настроены — см. notify в config.yaml."));
+    : el("span", {}, "Уведомления не настроены (Настройки → Подписки и уведомления)."));
   $("#subs-empty").hidden = d.items.length > 0;
   $("#subs-list").replaceChildren(...d.items.map(subCard));
 }

@@ -186,7 +186,7 @@ export async function search(query, page = 1) {
       const s = await api("/api/session").catch(() => null);
       if (s && !s.logged_in) { document.dispatchEvent(new CustomEvent("need-login")); $("#summary").textContent = "Нужен пароль"; finish(); return; }
     }
-    if (!cur.lastSnapshot) $("#summary").textContent = "Сервер не отвечает — запущен ли modelseek?";
+    if (!cur.lastSnapshot) $("#summary").textContent = "Сервер не отвечает. Проверьте, запущен ли modelseek.";
     finish();
   };
 }
@@ -221,7 +221,7 @@ function render(snap) {
   if (snap.translated) text += ` · искали по-английски: «${snap.translated}»`;
   if (pending) text += ` · ещё отвечают: ${pending}`;
   if (errs.length) text += ` · не ответили: ${errs.join(", ")}`;
-  if (snap.done && !hits.length) text += " · ничего не найдено. Попробуйте запрос на английском или ослабьте фильтры";
+  if (snap.done && !hits.length) text += " · ничего не найдено; помогают запрос на английском или менее строгие фильтры";
   $("#summary").textContent = text;
 }
 
@@ -248,7 +248,7 @@ async function hideHit(h, node) {
     for (const p of cur.pages) { const i = (p || []).findIndex((x) => x.key === h.key); if (i >= 0) p.splice(i, 1); }
     node.remove();
   }, 180);
-  toast("Скрыто. Вернуть можно в «Фильтры и веса → Сервис»");
+  toast("Модель скрыта. Скрытые модели возвращаются в «Фильтры и веса → Сервис»");
 }
 
 function hideAuthor(author) {

@@ -161,7 +161,7 @@ export function syncForm() {
       hint = feat.semantic.error || "Выключено: semantic.enabled в config.yaml";
     }
     if (k === "personal" && GUEST) { disabled = true; hint = "Только в админском профиле: избранное гостя хранится в его браузере"; }
-    else if (k === "personal" && !state.favorites.size) hint = "Заработает, когда в избранном что-то появится";
+    else if (k === "personal" && !state.favorites.size) hint = "Работает, когда в избранном есть модели";
     return slider({ id: "w-" + k, label, value: s.weights[k] ?? 0, min: 0, max: 1, step: 0.05, disabled, hint,
       onInput: (v) => { s.weights[k] = v; save(); } });
   }));
